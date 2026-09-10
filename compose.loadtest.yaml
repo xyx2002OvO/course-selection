@@ -2,15 +2,30 @@ services:
   api:
     environment:
       SPRING_PROFILES_ACTIVE: loadtest
-      SUBMIT_GLOBAL: "100000"
-      QUERY_GLOBAL: "100000"
       MANAGEMENT_PORT: "18090"
-    ports: ["127.0.0.1:18090:18090"]
-  worker:
+    ports: !override
+      - "127.0.0.1:18088:18080"
+      - "127.0.0.1:18090:18090"
+  web:
     environment:
       SPRING_PROFILES_ACTIVE: loadtest
       SUBMIT_GLOBAL: "100000"
       QUERY_GLOBAL: "100000"
+      STUDENT_FROM: "20001"
+      STUDENT_TO: "80000"
+      MANAGEMENT_PORT: "18092"
+  admission:
+    environment:
+      SPRING_PROFILES_ACTIVE: loadtest
+      SUBMIT_GLOBAL: "100000"
+      QUERY_GLOBAL: "100000"
+      STUDENT_FROM: "20001"
+      STUDENT_TO: "80000"
+      MANAGEMENT_PORT: "18093"
+    ports: ["127.0.0.1:18093:18093"]
+  worker:
+    environment:
+      SPRING_PROFILES_ACTIVE: loadtest
       MANAGEMENT_PORT: "18091"
       CONFIRM_CONCURRENCY: ${CONFIRM_CONCURRENCY:-6}
       PROJECT_CONCURRENCY: ${PROJECT_CONCURRENCY:-6}
@@ -35,8 +50,9 @@ services:
       COURSE_OPEN: "201"
       COURSE_SCARCE: "202"
       COURSE_FROM: "211"
-      COURSE_TO: "222"
+      COURSE_TO: "230"
     profiles: ["loadgen"]
     depends_on:
       api: {condition: service_healthy}
+      admission: {condition: service_healthy}
       worker: {condition: service_healthy}

@@ -2,7 +2,7 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { Counter } from 'k6/metrics';
 import exec from 'k6/execution';
-import { env, authHeader, uuid, studentForIteration, courseForIteration } from './helpers.js';
+import { env, uuid, studentForIteration, courseForIteration } from './helpers.js';
 
 const term = 202601;
 const outcomes = new Counter('admission_outcomes');
@@ -49,7 +49,7 @@ export default function () {
     : exec.scenario.iterationInTest;
   const student = studentForIteration(env.studentFrom, env.studentTo, iteration);
   const headers = {
-    Authorization: authHeader(student, env.password),
+    'X-Student-Id': String(student),
     'Idempotency-Key': uuid(),
     'Content-Type': 'application/json',
   };

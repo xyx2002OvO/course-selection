@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('submit', 'e2e', 'oversell', 'breaking', 'pipeline', 'all')]
+    [ValidateSet('submit', 'e2e', 'oversell', 'breaking', 'pipeline', 'ladder', 'all')]
     [string]$Scenario = 'all',
     [switch]$Rebuild,
     [switch]$SkipReset,
@@ -15,15 +15,16 @@ if (-not $env:PROJECT_CONCURRENCY) { $env:PROJECT_CONCURRENCY = "$ProjectConcurr
 if (-not $env:CONFIRM_CONCURRENCY) { $env:CONFIRM_CONCURRENCY = '6' }
 
 function Wait-Healthy {
-    $deadline = (Get-Date).AddMinutes(3)
+    $deadline = (Get-Date).AddMinutes(5)
     do {
         $api = docker inspect selection-demo-api-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>$null
+        $admission = docker inspect selection-demo-admission-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>$null
         $worker = docker inspect selection-demo-worker-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>$null
-        if ($api -eq 'healthy' -and $worker -eq 'healthy') { return }
+        if ($api -eq 'healthy' -and $admission -eq 'healthy' -and $worker -eq 'healthy') { return }
         Start-Sleep -Seconds 3
     } while ((Get-Date) -lt $deadline)
     docker compose @compose ps -a
-    throw "api/worker not healthy (api=$api worker=$worker)"
+    throw "api/admission/worker not healthy (api=$api admission=$admission worker=$worker)"
 }
 
 function Start-Stack([switch]$Build) {
@@ -49,7 +50,7 @@ function Invoke-Script([string]$Script, [string]$OutDir) {
     $stopFlag = Join-Path $OutDir 'stop-watch'
     Remove-Item $stopFlag, (Join-Path $OutDir 'first-failure.json') -ErrorAction SilentlyContinue
     $watchers = @()
-    if ($Script -eq 'breaking.js' -or $Script -eq 'pipeline.js') {
+    if ($Script -eq 'breaking.js' -or $Script -eq 'pipeline.js' -or $Script -eq 'ladder.js') {
         $watchers += Start-Process -FilePath 'powershell.exe' -PassThru -WindowStyle Hidden -ArgumentList @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass',
             '-File', "$PSScriptRoot\watch-instances.ps1",
@@ -79,16 +80,18 @@ function Invoke-Script([string]$Script, [string]$OutDir) {
             Stop-Process -Id $watch.Id -Force -ErrorAction SilentlyContinue
         }
         Save-Snapshot $OutDir 'database-at-stop.txt'
+        docker inspect selection-demo-admission-1 --format '{{json .Config.Env}}' |
+            Set-Content (Join-Path $OutDir 'admission-env.txt')
         docker inspect selection-demo-worker-1 --format '{{json .Config.Env}}' |
             Set-Content (Join-Path $OutDir 'worker-env.txt')
-        docker logs selection-demo-api-1 --since 15m 2>&1 |
+        docker logs selection-demo-admission-1 --since 15m 2>&1 |
             Select-String -Pattern 'HikariPool|Connection is not available|SQLTimeout|Lock wait' |
-            Set-Content (Join-Path $OutDir 'api-wait-log.txt')
+            Set-Content (Join-Path $OutDir 'admission-wait-log.txt')
         docker logs selection-demo-worker-1 --since 15m 2>&1 |
             Select-String -Pattern 'HikariPool|Connection is not available|SQLTimeout|Lock wait' |
             Set-Content (Join-Path $OutDir 'worker-wait-log.txt')
         docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}} {{.MemPerc}}' `
-            selection-demo-api-1 selection-demo-worker-1 selection-demo-mysql-1 selection-demo-redis-1 selection-demo-kafka-1 |
+            selection-demo-api-1 selection-demo-admission-1 selection-demo-worker-1 selection-demo-mysql-1 selection-demo-redis-1 selection-demo-kafka-1 |
             Set-Content (Join-Path $OutDir 'docker-stats.txt')
         $ErrorActionPreference = $previous
     }
@@ -127,7 +130,7 @@ if ($CompareConfirm) {
 }
 
 if ($SkipReset) {
-    Write-Output 'SkipReset: keeping current stack, waiting until api/worker are healthy.'
+    Write-Output 'SkipReset: keeping current stack, waiting until api/admission/worker are healthy.'
     Wait-Healthy
 } else {
     Start-Stack -Build:$Rebuild
@@ -139,20 +142,26 @@ $scripts = switch ($Scenario) {
     'oversell' { @('oversell.js') }
     'breaking' { @('breaking.js') }
     'pipeline' { @('pipeline.js') }
+    'ladder' { @('ladder.js') }
     default { @('submit.js', 'e2e.js', 'oversell.js') }
 }
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 foreach ($script in $scripts) {
     $name = [IO.Path]::GetFileNameWithoutExtension($script)
-    $outDir = if ($script -eq 'pipeline.js' -or $script -eq 'breaking.js') {
+    $outDir = if ($script -eq 'pipeline.js' -or $script -eq 'breaking.js' -or $script -eq 'ladder.js') {
         $runId = "$stamp-$name-confirm$($env:CONFIRM_CONCURRENCY)"
         $env:LOADTEST_OUT = "./loadtest/out/$runId/pipeline"
         New-Item -ItemType Directory -Force -Path (Join-Path $root "loadtest\out\$runId") | Out-Null
         @{
+            scenario = $name
             confirmConcurrency = $env:CONFIRM_CONCURRENCY
             projectConcurrency = $env:PROJECT_CONCURRENCY
-            httpTimeout = '1s'
+            courseFrom = 211
+            courseTo = 230
+            targetQps = 500
+            traffic = 'dispersed-students-and-courses'
+            admissionSplit = $true
         } | ConvertTo-Json | Set-Content (Join-Path $root "loadtest\out\$runId\run-metadata.json")
         Join-Path $root "loadtest\out\$runId\pipeline"
     } else {
@@ -162,5 +171,5 @@ foreach ($script in $scripts) {
     Invoke-Script $script $outDir
 }
 
-Write-Output 'Resource snapshot (Java instances must stay at 2 CPU / 1Gi):'
-docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' selection-demo-api-1 selection-demo-worker-1 selection-demo-mysql-1 selection-demo-redis-1 selection-demo-kafka-1
+Write-Output 'Resource snapshot (each Java instance 2 CPU / 1Gi; admission and worker are separate):'
+docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' selection-demo-api-1 selection-demo-admission-1 selection-demo-worker-1 selection-demo-mysql-1 selection-demo-redis-1 selection-demo-kafka-1

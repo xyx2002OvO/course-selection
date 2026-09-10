@@ -75,7 +75,7 @@ suites:
               json:
                 status: UP
       - id: AUTH-001
-        title: 选课接口无凭证拒绝
+        title: 选课接口缺少学生头返回 400
         automated: true
         tags: [security]
         steps:
@@ -88,35 +88,17 @@ suites:
             body:
               courseId: 101
             expect:
-              status: 401
+              status: 400
       - id: AUTH-002
         title: 错误密码拒绝
-        automated: true
+        automated: false
         tags: [security]
-        steps:
-          - action: http
-            method: GET
-            path: /api/terms/202601/selections/00000000-0000-0000-0000-00000000000a
-            auth: none
-            headers:
-              Authorization: Basic MTAwMTpiYWQtcGFzcw==
-            expect:
-              status: 401
+        steps: []
       - id: AUTH-003
         title: 运维账号不能调用学生选课 API
-        automated: true
+        automated: false
         tags: [security, rbac]
-        steps:
-          - action: http
-            method: POST
-            path: /api/terms/202601/selections
-            auth: ops
-            headers:
-              Idempotency-Key: 00000000-0000-0000-0000-000000000002
-            body:
-              courseId: 101
-            expect:
-              status: 403
+        steps: []
       - id: AUTH-004
         title: 学生不能访问 metrics
         automated: true

@@ -7,6 +7,7 @@ $csv = Join-Path $OutDir 'instance-health.csv'
 $fail = Join-Path $OutDir 'first-failure.json'
 $names = @(
     'selection-demo-api-1',
+    'selection-demo-admission-1',
     'selection-demo-worker-1',
     'selection-demo-mysql-1',
     'selection-demo-redis-1',
@@ -41,7 +42,7 @@ while (-not (Test-Path $stopFlag)) {
             $mem = $sp[1]
         }
         Add-Content -Encoding utf8 $csv "$now,$name,$status,$health,$oom,$cpu,$mem"
-        $core = $name -match 'api-1$|worker-1$|mysql-1$'
+        $core = $name -match 'api-1$|admission-1$|worker-1$|mysql-1$'
         $dead = ($status -in @('exited', 'dead', 'missing')) -or ($oom -eq 'true') -or ($status -eq 'restarting') -or ($core -and $health -eq 'unhealthy')
         if ($dead -and -not (Test-Path $fail)) {
             $payload = @{

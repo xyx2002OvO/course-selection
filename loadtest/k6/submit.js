@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';
-import { env, authHeader, uuid, studentForIteration } from './helpers.js';
+import { env, uuid, studentForIteration } from './helpers.js';
 
 const term = 202601;
 
@@ -40,7 +40,7 @@ export const options = {
 export default function () {
   const student = studentForIteration(env.studentFrom, env.studentTo, exec.scenario.iterationInTest);
   const headers = {
-    Authorization: authHeader(student, env.password),
+    'X-Student-Id': String(student),
     'Idempotency-Key': uuid(),
     'Content-Type': 'application/json',
   };

@@ -1,0 +1,101 @@
+server:
+  port: ${PORT:18081}
+  shutdown: graceful
+spring:
+  application:
+    name: selection-domain
+  config:
+    import: optional:nacos:selection-domain.yaml
+  cloud:
+    nacos:
+      config:
+        enabled: ${NACOS_CONFIG_ENABLED:true}
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        file-extension: yaml
+      discovery:
+        enabled: ${NACOS_DISCOVERY_ENABLED:true}
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        ip: ${NACOS_DISCOVERY_IP:127.0.0.1}
+        port: ${PORT:18081}
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:13306/selection?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true}
+    username: ${DB_USER:selection}
+    password: ${DB_PASSWORD:selection-dev}
+    hikari:
+      maximum-pool-size: 12
+      connection-timeout: 3000
+      connection-init-sql: SET SESSION innodb_lock_wait_timeout=5
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:16379}
+      timeout: 2s
+      connect-timeout: 2s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:19092}
+    admin:
+      fail-fast: true
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        delivery.timeout.ms: 10000
+        request.timeout.ms: 5000
+        max.block.ms: 5000
+    consumer:
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 50
+    listener:
+      ack-mode: manual_immediate
+      concurrency: 6
+  task:
+    scheduling:
+      pool:
+        size: 3
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+dubbo:
+  enabled: ${DUBBO_ENABLED:true}
+  application:
+    name: selection-domain
+    qos-enable: false
+  registry:
+    address: nacos://${NACOS_ADDR:127.0.0.1:8848}
+  protocol:
+    name: dubbo
+    port: ${DUBBO_PORT:20880}
+    host: ${DUBBO_REGISTER_HOST:127.0.0.1}
+  provider:
+    timeout: 8000
+app:
+  api-enabled: false
+  worker-enabled: ${WORKER_ENABLED:true}
+  bootstrap: ${BOOTSTRAP:false}
+  demo-password: ${DEMO_PASSWORD:demo-pass}
+  term: 202601
+  reservation-seconds: 120
+  dedup-seconds: 30
+  status-seconds: 86400
+  batch-size: 100
+  outbox-delay-ms: 1
+  reconcile-delay-ms: 2000
+  student-from: ${STUDENT_FROM:1001}
+  student-to: ${STUDENT_TO:1005}
+  submit-per-student: ${SUBMIT_PER_STUDENT:5}
+  submit-global: ${SUBMIT_GLOBAL:200}
+  query-per-student: ${QUERY_PER_STUDENT:10}
+  query-global: ${QUERY_GLOBAL:1000}
+  hotspot-per-course: ${HOTSPOT_PER_COURSE:50}
+  status-ttl-jitter-seconds: ${STATUS_TTL_JITTER_SECONDS:300}

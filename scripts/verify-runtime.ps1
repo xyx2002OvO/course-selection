@@ -1,5 +1,5 @@
 param(
-    [string]$ReferenceJar = (Join-Path $PSScriptRoot '..\target\course-selection-0.1.0.jar'),
+    [string]$ReferenceJar = (Join-Path $PSScriptRoot '..\selection-domain\target\selection-domain-0.1.0.jar'),
     [string]$OutputRoot = (Join-Path $PSScriptRoot '..\loadtest\out')
 )
 $ErrorActionPreference = 'Stop'

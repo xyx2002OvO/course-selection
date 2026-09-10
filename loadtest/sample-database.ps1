@@ -1,11 +1,9 @@
 param(
     [Parameter(Mandatory)][string]$OutDir,
-    [int]$ApiPort = 18090,
+    [int]$AdmissionPort = 18093,
     [int]$WorkerPort = 18091
 )
 $ErrorActionPreference = 'Stop'
-$password = if ($env:DEMO_PASSWORD) { $env:DEMO_PASSWORD } else { 'demo-pass' }
-$authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("ops:$password"))
 $stopFlag = Join-Path $OutDir 'stop-watch'
 $requestSql = @'
 SELECT UNIX_TIMESTAMP(NOW(6)) AS sampled_at, COUNT(*) AS requests,
@@ -51,10 +49,10 @@ function Invoke-Mysql([string]$User, [string]$Password, [string]$Sql) {
 
 function Read-Metric([int]$Port, [string]$Name) {
     $uri = "http://127.0.0.1:$Port/actuator/metrics/$Name"
-    Invoke-RestMethod $uri -Headers @{ Authorization = $authorization } -TimeoutSec 2
+    Invoke-RestMethod $uri -TimeoutSec 2
 }
 
-$apiMetrics = @(
+$admissionMetrics = @(
     'hikaricp.connections.active',
     'hikaricp.connections.pending',
     'hikaricp.connections.idle',
@@ -117,7 +115,7 @@ try {
                 ConvertTo-Json -Compress | Add-Content (Join-Path $OutDir 'mysql-wait-events.jsonl')
         }
 
-        foreach ($pair in @(@{ port = $ApiPort; names = $apiMetrics }, @{ port = $WorkerPort; names = $workerMetrics })) {
+        foreach ($pair in @(@{ port = $AdmissionPort; names = $admissionMetrics }, @{ port = $WorkerPort; names = $workerMetrics })) {
             foreach ($metric in $pair.names) {
                 try {
                     $value = Read-Metric $pair.port $metric

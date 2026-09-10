@@ -1,15 +1,13 @@
 param(
     [int]$Student = 1001,
     [int]$Course = 101,
-    [string]$Password = 'demo-pass',
     [string]$BaseUrl = 'http://localhost:18080',
     [string]$RequestId = [guid]::NewGuid().ToString(),
     [int]$WaitSeconds = 30,
     [switch]$QueryOnly
 )
 $ErrorActionPreference = 'Stop'
-$credential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${Student}:$Password"))
-$headers = @{ Authorization = "Basic $credential"; 'Idempotency-Key' = $RequestId }
+$headers = @{ 'X-Student-Id' = "$Student"; 'Idempotency-Key' = $RequestId }
 $endpoint = "$BaseUrl/api/terms/202601/selections"
 Write-Output "RequestId: $RequestId"
 if (-not $QueryOnly) {

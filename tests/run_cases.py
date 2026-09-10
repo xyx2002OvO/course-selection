@@ -171,8 +171,7 @@ class Runner:
     def auth(self, user: str | int | None) -> dict[str, str]:
         if user in (None, "none"):
             return {}
-        token = base64.b64encode(f"{user}:{self.password}".encode()).decode()
-        return {"Authorization": f"Basic {token}"}
+        return {"X-Student-Id": str(user)}
 
     def url(self, path: str) -> str:
         if path.startswith("http"):

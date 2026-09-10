@@ -12,18 +12,21 @@
 
 | 角色 | CPU 配额 | 内存配额 | 进程内限制 | 目的 |
 | --- | --- | --- | --- | --- |
-| API | 2.0 | 1Gi | `-Xms512m -Xmx512m`，元空间 128m，`ActiveProcessorCount=2` | 被测入口 |
-| Worker | 2.0 | 1Gi | 与 API 完全相同 | 避免 API/Worker 因配额不对称造成假瓶颈 |
+| API | 2.0 | 1Gi | `-Xms512m -Xmx512m`，元空间 128m，`ActiveProcessorCount=2` | 被测入口（Gateway） |
+| Admission | 2.0 | 1Gi | 与 API 完全相同 | Dubbo 受理：Lua + `accept()` 写库；**不**消费 Kafka |
+| Worker | 2.0 | 1Gi | 与 API 完全相同 | Outbox 发布 + `confirm()` 落库；**不**接 Dubbo |
 | MySQL | 2.0 | 1Gi | `innodb-buffer-pool-size=256M`，`max-connections=80` | 数据面，单独配额，不从 Java 偷核 |
 | Redis | 1.0 | 256Mi | `maxmemory 128mb`，`noeviction` | 预占与限流 |
 | Kafka | 1.0 | 768Mi | `KAFKA_HEAP_OPTS=-Xms256m -Xmx256m` | 异步管道 |
 | k6 | 4.0 | 2Gi | 容器内访问 `http://api:18080` | 发生器与被测隔离；breaking 需要更多 VU，配额大于被测 Java |
 
-合计约 **10 CPU / 4.5Gi**。请保证 Docker Desktop 的 Linux VM **不少于 12 CPU、8Gi**，否则配额会被宿主机再截一次，实验不公平。
+合计约 **12 CPU / 5.5Gi**（相对 2026-09-10 基线，domain 从 1 个 2 核进程拆成受理+确认各 2 核；MySQL/Kafka/Redis 配额不变）。请保证 Docker Desktop 的 Linux VM **不少于 14 CPU、10Gi**，否则配额会被宿主机再截一次，实验不公平。
+
+1a 实验问的是：500 hold 下落库能否从约 47 回到 100+。多出来的 2 核是确认侧独占，不是给 Kafka/MySQL 加配额。解读时不要把「拆进程」和「给确认加核」完全拆开；要对照的是同压力下 pending 是否还被受理写库挤瘦。
 
 不要只改 `cpus` 或只改 `-Xmx`。必须同时改：
 
-1. `compose.yaml` 里 API/Worker 的 `cpus` / `mem_limit`
+1. `compose.yaml` 里各 Java 服务的 `cpus` / `mem_limit`
 2. `JAVA_TOOL_OPTIONS` 里的 `-XX:ActiveProcessorCount` 和 `-Xms/-Xmx`（堆固定 512m，容器 1Gi）
 
 `AlwaysPreTouch` 会在启动时摸完堆，避免第一波请求把缺页算进延迟。
@@ -52,16 +55,23 @@ Tomcat 最大线程 64、Hikari 16：与 2 核匹配，避免默认 200 工作�
 2. **e2e**：20 个 VU 提交后轮询终态。看 `time_to_terminal` 的 p95/p99。学生占用会回收，VU 数必须小于学生数。
 3. **oversell**：40 VU、200 次迭代打课程 202（50 名额）。HTTP 只允许 202/200/409。结束后应满足 `enrollment <= 50` 且 `course.remaining >= 0`。
 4. **breaking**：同一门课 201（50 万名额），学生池 `20001-80000`。从 200 rps 起按 1.35 倍加码，**没有业务上限**；k6 只是必须给一条有限 stage 列表。旁边有进程盯 API/Worker/MySQL，谁退出、OOM 或不健康就杀掉发生器。k6 连续连不上或连续 5xx 也会自己停。全局提交限流在 overlay 里放到 100000，避免 429 先挡住。报告里的 **最高可稳住 QPS** 是失败率仍 < 2% 的最高台阶。这条默认不跟 `all` 一起跑。
+5. **ladder**：模拟学生分散选课的受理阶梯。课程 `211-230`（每门 10 万名额），学生 `20001-80000` 按迭代轮转、每人新幂等键。Sentinel 热点仍是每课 50 QPS，20 门课理论上限 1000 QPS，500 全局时每课约 25。台阶：预热 20s@50，之后 100/200/300/400 各 8s 爬升 + 20s hold，最后 10s 爬到 500 并 hold 30s。只打受理接口。**稳住**定义：该 hold 受理成功率 ≥ 98%、实现受理 QPS ≥ 目标的 95%、无连接失败、5xx < 2%。429 记为限流不是崩溃。本机 Docker 2 核配额下 500 是实验目标，不是容量承诺。
+
+```powershell
+.\loadtest\run.cmd -Scenario ladder
+```
 
 ## 怎么跑
 
 ```powershell
 cd outputs\course-selection
-.\loadtest\run.ps1 -Rebuild          # 首次或改过 Java 代码
-.\loadtest\run.ps1 -Scenario submit
-.\loadtest\run.ps1 -Scenario e2e
-.\loadtest\run.ps1 -Scenario oversell
-.\loadtest\run.ps1 -Scenario breaking   # 加压到实例挂；脚本会一直加码直到挂或连不上
+# 本机默认 Restricted 时不要改系统策略，用 Bypass 或 run.cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File .\loadtest\run.ps1 -Rebuild
+.\loadtest\run.cmd -Rebuild
+.\loadtest\run.cmd -Scenario submit
+.\loadtest\run.cmd -Scenario e2e
+.\loadtest\run.cmd -Scenario oversell
+.\loadtest\run.cmd -Scenario breaking   # 加压到实例挂；脚本会一直加码直到挂或连不上
 ```
 
 跑完看 `docker stats`：API/Worker 的内存上限应停在 1Gi，不应接近宿主机全部内存。

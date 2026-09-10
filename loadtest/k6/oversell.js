@@ -2,7 +2,7 @@ import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
-import { env, authHeader, uuid } from './helpers.js';
+import { env, uuid } from './helpers.js';
 
 const term = 202601;
 const accepted = new Counter('submit_accepted');
@@ -25,7 +25,7 @@ export const options = {
 export default function () {
   const student = env.studentFrom + exec.scenario.iterationInTest;
   const headers = {
-    Authorization: authHeader(student, env.password),
+    'X-Student-Id': String(student),
     'Idempotency-Key': uuid(),
     'Content-Type': 'application/json',
   };

@@ -1,0 +1,40 @@
+server:
+  port: ${PORT:18082}
+  shutdown: graceful
+spring:
+  application:
+    name: selection-web
+  config:
+    import: optional:nacos:selection-web.yaml
+  cloud:
+    nacos:
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      config:
+        enabled: ${NACOS_CONFIG_ENABLED:true}
+        file-extension: yaml
+      discovery:
+        enabled: true
+        ip: ${NACOS_DISCOVERY_IP:127.0.0.1}
+        port: ${PORT:18082}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+dubbo:
+  application:
+    name: selection-web
+    qos-enable: false
+  registry:
+    address: nacos://${NACOS_ADDR:127.0.0.1:8848}
+  consumer:
+    timeout: 8000
+    check: false
+app:
+  term: 202601
+  student-from: ${STUDENT_FROM:1001}
+  student-to: ${STUDENT_TO:1005}

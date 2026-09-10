@@ -2,7 +2,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import exec from 'k6/execution';
 import { Trend } from 'k6/metrics';
-import { env, authHeader, uuid } from './helpers.js';
+import { env, uuid } from './helpers.js';
 
 const term = 202601;
 const timeToTerminal = new Trend('time_to_terminal', true);
@@ -33,7 +33,7 @@ export default function () {
   const student = env.studentFrom + (exec.vu.idInTest - 1);
   const id = uuid();
   const headers = {
-    Authorization: authHeader(student, env.password),
+    'X-Student-Id': String(student),
     'Idempotency-Key': id,
     'Content-Type': 'application/json',
   };

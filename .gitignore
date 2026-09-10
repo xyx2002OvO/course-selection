@@ -1,9 +1,10 @@
-/target/
+target/
 /.idea/
 *.log
 .env
 .env.*
 /loadtest/out/
 /tests/out/
+Dockerfile.runtime
 .DS_Store
 *.iml

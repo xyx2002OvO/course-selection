@@ -1,8 +1,8 @@
 # 最小异步选课系统
 
-Java 21 / Spring Boot 3.5.16 / MySQL 8.4 / Redis 7.4 / Apache Kafka 4.0.2。
+Java 21 / Spring Boot 3.5.16 / Spring Cloud Alibaba 2025.0.0.0 / Apache Dubbo 3.3.4 / Nacos 2.3.2 / Sentinel 1.8.8 / MySQL 8.4 / Redis 7.4 / Apache Kafka 4.0.2。
 
-这是可本地部署的教学最小版，保留并发正确性和故障恢复的主流程。单个 Maven 工程分别运行 API、Worker 两个角色，领域层是独立 Java 包，不额外引入一次 HTTP 调用。
+这是可本地部署的教学最小版。不做登录和鉴权；学生身份用请求头 `X-Student-Id`。`selection-gateway` 只路由；`selection-web` 和 `selection-domain` 注册到 Nacos。RPC 是 Dubbo。
 
 本次实际构建、测试及环境限制见 [VERIFICATION.md](VERIFICATION.md)。
 
@@ -13,22 +13,25 @@ Java 21 / Spring Boot 3.5.16 / MySQL 8.4 / Redis 7.4 / Apache Kafka 4.0.2。
 ```powershell
 docker compose up --build -d
 docker compose ps -a
-docker compose logs -f api worker
+docker compose logs -f api admission worker
 ```
 
-`init` 执行 Flyway 建表和首次 Redis 库存初始化，正常结束为 `Exited (0)`；之后 API、Worker 启动。基础设施使用持久化卷，端口仅绑定本机。
+`init` 执行 Flyway 建表和首次 Redis 库存初始化，正常结束为 `Exited (0)`；之后 Admission、Worker、Web、API 启动。基础设施使用持久化卷，端口仅绑定本机。
 
 | 服务 | 地址 |
 | --- | --- |
-| API | http://localhost:18080 |
-| Worker 健康检查 | http://localhost:18081/actuator/health |
+| Gateway | http://localhost:18080 ，转发到 Web |
+| Web | http://localhost:18082 ，仅内部调试 |
+| Admission 健康检查 | http://localhost:18083/actuator/health （Dubbo 受理） |
+| Worker 健康检查 | http://localhost:18081/actuator/health （Kafka 确认） |
 | MySQL | localhost:13306，库 `selection`，用户 `selection`，密码 `selection-dev` |
 | Redis | localhost:16379 |
 | Kafka | localhost:19092，容器内部 `kafka:9092` |
+| Nacos | http://localhost:18848/nacos ，容器内部 `nacos:8848` |
 
 停止但保留数据：`docker compose down`。重新运行不会把已有名额重置为初始容量。
 
-演示使用 HTTP Basic，学生账号 `1001` 到 `1005`，默认密码 `demo-pass`；运维账号 `ops`。可通过 `DEMO_PASSWORD` 修改演示密码。身份来自认证上下文，提交接口不接受外部传入的学生 ID，状态查询也验证申请归属。此认证配置只供本机演示，正式系统需接入现有认证网关或 OIDC。
+演示学生 `1001` 到 `1005`，用请求头 `X-Student-Id` 标明身份，没有登录。状态查询仍校验申请是否属于该学生。
 
 ## 实际操作
 
@@ -46,7 +49,7 @@ docker compose logs -f api worker
 
 ```http
 POST /api/terms/202601/selections
-Authorization: Basic <学生账号和密码>
+X-Student-Id: 1001
 Idempotency-Key: <客户端为本次业务申请生成的UUID，重试时不变>
 Content-Type: application/json
 
@@ -69,8 +72,8 @@ Content-Type: application/json
 
 ## 一条申请怎样走完
 
-1. API 认证、限流。Lua 原子检查学生占用、课程名额、幂等身份，预扣 Redis 名额，写入预占账本、状态缓存和到期索引。
-2. `SelectionService.accept` 在 MySQL 一个事务中写申请与 COMMAND Outbox，提交后返回处理中。完整规则不在入口执行。
+1. 请求先到 Gateway，再到 Web（`X-Student-Id`），再经 Dubbo 调领域服务。未知课程先被内存布隆过滤器挡住；热点课程走 Sentinel 参数限流。Lua 原子检查学生占用、课程名额、幂等，预扣库存；状态缓存 TTL 带随机抖动。
+2. `SelectionService.accept` 在 MySQL 一个事务中写申请与 COMMAND Outbox，提交后返回处理中。完整规则不在 HTTP 入口执行。
 3. Worker 以带租约的抢占方式取得 Outbox，事务外发送 Kafka；收到确认才标记 SENT。发送失败指数退避，进程崩溃后租约到期可接管。
 4. Kafka 按 `学生:学期` 分区。消费者先锁申请行，再锁学生学期行，以 READ_COMMITTED 读取最新已选课程并校验。
 5. 数据库条件扣减名额、写选课记录、记录申请终态和 RESULT Outbox，在同一事务提交。之后才 ACK Kafka。重复消息看到终态直接 ACK。
@@ -81,15 +84,16 @@ Content-Type: application/json
 ## 目录
 
 ```text
-src/main/java/dev/demo/selection/
-  api/             HTTP 接入、演示认证、错误响应
+selection-rpc/     Dubbo 接口与 DTO
+selection-gateway/ Nacos 发现 Web，只路由不鉴权
+selection-web/     HTTP、注册到 Nacos
+selection-domain/
+  api/             领域进程 Actuator 鉴权
+  rpc/             Dubbo 实现：预占 + accept + 状态查询
   application/     受理、确认、取消的事务边界
   domain/          申请与课程模型、纯业务规则
   infrastructure/  MySQL、Redis Lua、Outbox 存储、初始化
   worker/          Kafka 收发、对账、状态修复、积压指标
-src/main/resources/
-  db/migration/    Flyway 表结构与演示数据
-  lua/             预占、终态投影、限流、缓存修复
 scripts/select.ps1 提交与指数退避轮询客户端
 ```
 
@@ -132,8 +136,9 @@ mvn verify
 压测实验的资源配额、三条场景和公平性约定见 [loadtest/LOADTEST.md](loadtest/LOADTEST.md)。API 与 Worker 固定 **2 CPU / 1Gi**，堆 **512m**，`ActiveProcessorCount=2`。
 
 ```powershell
-.\loadtest\run.ps1 -Rebuild -Scenario submit
-.\loadtest\run.ps1 -Rebuild -Scenario breaking
+powershell -NoProfile -ExecutionPolicy Bypass -File .\loadtest\run.ps1 -Rebuild -Scenario submit
+.\loadtest\run.cmd -Rebuild -Scenario submit
+.\loadtest\run.cmd -Rebuild -Scenario breaking
 ```
 
 ## 最小版边界
@@ -143,6 +148,6 @@ mvn verify
 - Redis 整体丢失时不自动从数据库剩余名额直接重置库存。已存在申请时初始化拒绝执行；结果投影发现预占账本缺失或终态冲突时暂停该学期新受理，需要停入口后人工核查与重建。此版实现请求级对账，未实现灾难恢复级全量重建。
 - 一个学期的 Lua Key 采用相同 hash tag，兼容同槽要求，但一个学期集中在一个 Redis 分片。它不是无限水平扩展的入口方案。
 - 每门课只建模一个每周时间区间，课程配置在选课期间视为固定；未实现退课、管理员代选、复杂周次和远程资格服务。新增修改入口必须复用学生学期事务锁。
-- API 与 Worker 复用同一领域包和数据库，不引入服务注册中心、配置中心或分布式事务框架。需要拆成独立领域服务时可以保留现有应用服务接口。
+- 本版不做登录鉴权。Nacos 单机，配置启动时拉取。Sentinel 无控制台。单用户串行是 Kafka 分区 + MySQL `FOR UPDATE`。
 
 参考：[Spring Boot 系统要求](https://docs.spring.io/spring-boot/3.5/system-requirements.html)、[Kafka 官方容器](https://kafka.apache.org/40/getting-started/docker/)、[Spring Kafka ACK 语义](https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html)。

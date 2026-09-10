@@ -1,0 +1,16 @@
+spring:
+  config:
+    activate:
+      on-profile: loadtest
+server:
+  tomcat:
+    threads:
+      max: 64
+      min-spare: 8
+    accept-count: 100
+management:
+  server:
+    port: ${MANAGEMENT_PORT:18090}
+app:
+  student-from: ${STUDENT_FROM:20001}
+  student-to: ${STUDENT_TO:80000}

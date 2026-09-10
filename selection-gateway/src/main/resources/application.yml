@@ -1,0 +1,25 @@
+server:
+  port: ${PORT:18080}
+spring:
+  application:
+    name: selection-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        register-enabled: false
+    gateway:
+      routes:
+        - id: selection-web
+          uri: lb://selection-web
+          predicates:
+            - Path=/api/**,/actuator/**
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
