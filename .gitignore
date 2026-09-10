@@ -1,0 +1,9 @@
+/target/
+/.idea/
+*.log
+.env
+.env.*
+/loadtest/out/
+/tests/out/
+.DS_Store
+*.iml

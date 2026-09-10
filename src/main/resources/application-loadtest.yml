@@ -1,0 +1,39 @@
+spring:
+  config:
+    activate:
+      on-profile: loadtest
+  flyway:
+    locations: classpath:db/migration,classpath:db/loadtest
+  datasource:
+    hikari:
+      maximum-pool-size: 16
+      minimum-idle: 8
+  kafka:
+    listener:
+      concurrency: 6
+server:
+  tomcat:
+    threads:
+      max: 64
+      min-spare: 8
+    accept-count: 100
+management:
+  server:
+    port: ${MANAGEMENT_PORT:18090}
+  metrics:
+    distribution:
+      percentiles:
+        hikaricp.connections.acquire: 0.5, 0.95, 0.99
+        hikaricp.connections.usage: 0.5, 0.95, 0.99
+        selection.accept.duration: 0.5, 0.95, 0.99
+        selection.confirm.duration: 0.5, 0.95, 0.99
+        selection.tx.commit: 0.5, 0.95, 0.99
+app:
+  confirm-concurrency: ${CONFIRM_CONCURRENCY:6}
+  project-concurrency: ${PROJECT_CONCURRENCY:6}
+  student-from: ${STUDENT_FROM:20001}
+  student-to: ${STUDENT_TO:80000}
+  submit-per-student: ${SUBMIT_PER_STUDENT:100}
+  submit-global: ${SUBMIT_GLOBAL:5000}
+  query-per-student: ${QUERY_PER_STUDENT:200}
+  query-global: ${QUERY_GLOBAL:5000}

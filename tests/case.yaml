@@ -1,0 +1,595 @@
+version: 1
+name: 最小异步选课系统 HTTP/E2E 用例目录
+description: "覆盖鉴权、校验、幂等、业务规则、限流、缓存修复与并发防超卖。slow 用例默认跳过。可变状态用例会重置演示数据。"
+
+config:
+  base_url: http://localhost:18080
+  password: demo-pass
+  db_password: selection-dev
+  term: 202601
+  timeout_sec: 10
+  poll:
+    timeout_sec: 40
+
+fixtures:
+  students:
+    - id: 1001
+      passed: [9001]
+      notes: 可修 103
+    - id: 1002
+      passed: [9001]
+    - id: 1003
+      passed: []
+      notes: 103 先修失败
+    - id: 1004
+      passed: []
+    - id: 1005
+      passed: []
+    - id: ops
+      role: OPS
+      notes: 不可访问 /api
+  courses:
+    - id: 101
+      title: Java Foundations
+      seats: 2
+      credits: 3
+      time: "Mon [1,3)"
+      exclusion: language-intro
+    - id: 102
+      title: Database Systems
+      seats: 2
+      credits: 3
+      time: "Mon [2,4)"
+      notes: 与 101 时间冲突
+    - id: 103
+      title: Distributed Systems
+      seats: 1
+      credits: 4
+      prereq: 9001
+    - id: 104
+      title: Python Foundations
+      seats: 2
+      credits: 3
+      exclusion: language-intro
+    - id: 105
+      title: Systems Lab
+      seats: 2
+      credits: 6
+      notes: 与 101 合计学分 9 超限
+
+suites:
+  - id: S01_health_security
+    title: 健康检查与安全边界
+    cases:
+      - id: HEALTH-001
+        title: 健康检查无需认证
+        automated: true
+        tags: [health, security]
+        steps:
+          - action: http
+            method: GET
+            path: /actuator/health
+            auth: none
+            expect:
+              status: 200
+              json:
+                status: UP
+      - id: AUTH-001
+        title: 选课接口无凭证拒绝
+        automated: true
+        tags: [security]
+        steps:
+          - action: http
+            method: POST
+            path: /api/terms/202601/selections
+            auth: none
+            headers:
+              Idempotency-Key: 00000000-0000-0000-0000-000000000001
+            body:
+              courseId: 101
+            expect:
+              status: 401
+      - id: AUTH-002
+        title: 错误密码拒绝
+        automated: true
+        tags: [security]
+        steps:
+          - action: http
+            method: GET
+            path: /api/terms/202601/selections/00000000-0000-0000-0000-00000000000a
+            auth: none
+            headers:
+              Authorization: Basic MTAwMTpiYWQtcGFzcw==
+            expect:
+              status: 401
+      - id: AUTH-003
+        title: 运维账号不能调用学生选课 API
+        automated: true
+        tags: [security, rbac]
+        steps:
+          - action: http
+            method: POST
+            path: /api/terms/202601/selections
+            auth: ops
+            headers:
+              Idempotency-Key: 00000000-0000-0000-0000-000000000002
+            body:
+              courseId: 101
+            expect:
+              status: 403
+      - id: AUTH-004
+        title: 学生不能访问 metrics
+        automated: true
+        tags: [security, rbac]
+        steps:
+          - action: http
+            method: GET
+            path: /actuator/metrics
+            auth: 1001
+            expect:
+              status: 403
+      - id: AUTH-005
+        title: 运维账号可以访问 metrics
+        automated: true
+        tags: [security, rbac, observability]
+        steps:
+          - action: http
+            method: GET
+            path: /actuator/metrics
+            auth: ops
+            expect:
+              status: 200
+
+  - id: S02_validation
+    title: 入参与学期校验
+    cases:
+      - id: VAL-001
+        title: 缺少幂等键时被拒绝（当前实现走 /error，安全链返回 403）
+        automated: true
+        tags: [validation]
+        steps:
+          - action: http
+            method: POST
+            path: /api/terms/202601/selections
+            auth: 1001
+            body:
+              courseId: 101
+            expect:
+              status: 403
+      - id: VAL-002
+        title: 非法幂等键无法解析为 UUID 时按身份复用冲突处理
+        automated: true
+        tags: [validation]
+        steps:
+          - action: http
+            method: POST
+            path: /api/terms/202601/selections
+            auth: 1001
+            headers:
+              Idempotency-Key: not-a-uuid
+            body:
+              courseId: 101
+            expect:
+              status: 409
+              code: IDEMPOTENCY_KEY_REUSED
+      - id: VAL-003
+        title: courseId 非正数（校验失败进入 /error，返回 403）
+        automated: true
+        tags: [validation]
+        steps:
+          - action: http
+            method: POST
+            path: /api/terms/202601/selections
+            auth: 1001
+            headers:
+              Idempotency-Key: 00000000-0000-0000-0000-000000000003
+            body:
+              courseId: 0
+            expect:
+              status: 403
+      - id: VAL-004
+        title: 非法 JSON（解析失败进入 /error，返回 403）
+        automated: true
+        tags: [validation]
+        steps:
+          - action: http
+            method: POST
+            path: /api/terms/202601/selections
+            auth: 1001
+            headers:
+              Idempotency-Key: 00000000-0000-0000-0000-000000000004
+              Content-Type: application/json
+            raw_body: "{not-json"
+            expect:
+              status: 403
+      - id: VAL-005
+        title: 未知学期
+        automated: true
+        tags: [validation, isolation]
+        steps:
+          - action: http
+            method: POST
+            path: /api/terms/199901/selections
+            auth: 1001
+            headers:
+              Idempotency-Key: 00000000-0000-0000-0000-000000000005
+            body:
+              courseId: 101
+            expect:
+              status: 404
+              code: TERM_NOT_FOUND
+      - id: VAL-006
+        title: 未知课程不预扣并返回 503
+        automated: true
+        tags: [validation, reservation]
+        reset: true
+        steps:
+          - action: submit
+            student: 1001
+            course: 999
+            expect:
+              status: 503
+              code: ADMISSION_NOT_READY_OR_COURSE_UNKNOWN
+
+  - id: S03_happy_idempotency
+    title: 成功路径、幂等与占用
+    cases:
+      - id: FLOW-001
+        title: 1001 选 101 最终成功
+        automated: true
+        tags: [happy, kafka]
+        reset: true
+        steps:
+          - action: submit
+            student: 1001
+            course: 101
+            as: a
+            poll: true
+            expect:
+              status: 202
+              json:
+                state: PROCESSING
+              header:
+                Retry-After: true
+                Cache-Control: true
+            final:
+              status: 200
+              json:
+                state: SUCCESS
+                reason: ""
+      - id: FLOW-002
+        title: 同一幂等键重复提交不二次扣减
+        automated: true
+        tags: [idempotency]
+        reset: true
+        steps:
+          - action: submit
+            student: 1001
+            course: 101
+            as: a
+            poll: true
+            final:
+              json:
+                state: SUCCESS
+          - action: submit
+            student: 1001
+            course: 101
+            request_id: ${a.id}
+            expect:
+              status: 200
+              json:
+                state: SUCCESS
+      - id: FLOW-003
+        title: 同一幂等键更换课程冲突
+        automated: true
+        tags: [idempotency]
+        reset: true
+        steps:
+          - action: submit
+            student: 1001
+            course: 101
+            as: a
+          - action: submit
+            student: 1001
+            course: 102
+            request_id: ${a.id}
+            expect:
+              status: 409
+              json_in:
+                code: [KEY_REUSED, IDEMPOTENCY_KEY_REUSED]
+      - id: FLOW-004
+        title: 处理中学生不能再占另一门课
+        automated: true
+        tags: [reservation, student_busy]
+        reset: true
+        steps:
+          - action: compose
+            service: worker
+            verb: stop
+          - action: submit
+            student: 1001
+            course: 101
+            as: a
+            expect:
+              status: 202
+          - action: submit
+            student: 1001
+            course: 102
+            expect:
+              status: 409
+              code: STUDENT_BUSY
+          - action: compose
+            service: worker
+            verb: start
+          - action: poll
+            ref: a
+            expect:
+              json:
+                state: SUCCESS
+      - id: FLOW-005
+        title: 查询只返回申请归属学生
+        automated: true
+        tags: [privacy, query]
+        reset: true
+        steps:
+          - action: submit
+            student: 1001
+            course: 101
+            as: a
+            poll: true
+            final:
+              json:
+                state: SUCCESS
+          - action: query
+            student: 1002
+            ref: a
+            expect:
+              status: 404
+              code: REQUEST_NOT_FOUND
+          - action: query
+            student: 1001
+            ref: a
+            expect:
+              status: 200
+              json:
+                state: SUCCESS
+
+  - id: S04_business_rules
+    title: 领域规则（先修、冲突、互斥、学分、重复、售罄）
+    cases:
+      - id: RULE-001
+        title: 先修未通过被拒绝并回补名额
+        automated: true
+        tags: [rule, prerequisite]
+        reset: true
+        steps:
+          - action: submit
+            student: 1003
+            course: 103
+            poll: true
+            final:
+              json:
+                state: REJECTED
+                reason: PREREQUISITE_NOT_MET
+          - action: submit
+            student: 1001
+            course: 103
+            poll: true
+            final:
+              json:
+                state: SUCCESS
+      - id: RULE-002
+        title: 时间冲突
+        automated: true
+        tags: [rule, time]
+        reset: true
+        steps:
+          - action: submit
+            student: 1001
+            course: 101
+            poll: true
+            final:
+              json:
+                state: SUCCESS
+          - action: submit
+            student: 1001
+            course: 102
+            poll: true
+            final:
+              json:
+                state: REJECTED
+                reason: TIME_CONFLICT
+      - id: RULE-003
+        title: 互斥课程
+        automated: true
+        tags: [rule, exclusion]
+        reset: true
+        steps:
+          - action: submit
+            student: 1001
+            course: 101
+            poll: true
+            final:
+              json:
+                state: SUCCESS
+          - action: submit
+            student: 1001
+            course: 104
+            poll: true
+            final:
+              json:
+                state: REJECTED
+                reason: MUTUALLY_EXCLUSIVE
+      - id: RULE-004
+        title: 学分超限
+        automated: true
+        tags: [rule, credit]
+        reset: true
+        steps:
+          - action: submit
+            student: 1001
+            course: 101
+            poll: true
+            final:
+              json:
+                state: SUCCESS
+          - action: submit
+            student: 1001
+            course: 105
+            poll: true
+            final:
+              json:
+                state: REJECTED
+                reason: CREDIT_LIMIT
+      - id: RULE-005
+        title: 已选成功后再次选同一门
+        automated: true
+        tags: [rule, already_enrolled]
+        reset: true
+        steps:
+          - action: submit
+            student: 1001
+            course: 101
+            poll: true
+            final:
+              json:
+                state: SUCCESS
+          - action: submit
+            student: 1001
+            course: 101
+            poll: true
+            final:
+              json:
+                state: REJECTED
+                reason: ALREADY_ENROLLED
+      - id: RULE-006
+        title: Redis 预占层售罄
+        automated: true
+        tags: [rule, sold_out]
+        reset: true
+        steps:
+          - action: compose
+            service: worker
+            verb: stop
+          - action: submit
+            student: 1001
+            course: 103
+            as: hold
+            expect:
+              status: 202
+          - action: submit
+            student: 1002
+            course: 103
+            expect:
+              status: 409
+              code: SOLD_OUT
+          - action: compose
+            service: worker
+            verb: start
+          - action: poll
+            ref: hold
+            expect:
+              json:
+                state: SUCCESS
+
+  - id: S05_query_repair_ratelimit
+    title: 查询修复与限流
+    cases:
+      - id: QUERY-001
+        title: 未知申请先 CONFIRMING 再变为 NOT_FOUND
+        automated: true
+        tags: [query, repair]
+        reset: true
+        steps:
+          - action: compose
+            service: worker
+            verb: start
+          - action: query
+            student: 1001
+            request_id: 11111111-1111-1111-1111-111111111111
+            expect:
+              status: 200
+              json:
+                state: CONFIRMING
+          - action: sleep
+            seconds: 4
+          - action: query
+            student: 1001
+            request_id: 11111111-1111-1111-1111-111111111111
+            expect:
+              status: 404
+              code: REQUEST_NOT_FOUND
+      - id: LIMIT-001
+        title: 提交超过每学生 5 次/秒返回 429
+        automated: true
+        tags: [ratelimit]
+        reset: true
+        steps:
+          - action: burst_submit
+            student: 1005
+            course: 102
+            count: 8
+
+  - id: S06_concurrency
+    title: 并发防超卖
+    cases:
+      - id: CONC-001
+        title: 两名额课程三人并发最多两人成功
+        automated: true
+        tags: [concurrency, oversell]
+        reset: true
+        steps:
+          - action: parallel_submit
+            poll: true
+            requests:
+              - student: 1001
+                course: 101
+              - student: 1002
+                course: 101
+              - student: 1004
+                course: 101
+            expect:
+              success_count: 2
+              min_conflict: 1
+
+  - id: S07_chaos
+    title: 故障演练（默认跳过）
+    cases:
+      - id: CHAOS-001
+        title: Worker 停机超过处理期限后申请取消且名额恢复
+        automated: true
+        tags: [chaos, slow]
+        reset: true
+        steps:
+          - action: compose
+            service: worker
+            verb: stop
+          - action: submit
+            student: 1001
+            course: 101
+            as: a
+            expect:
+              status: 202
+          - action: sleep
+            seconds: 125
+          - action: compose
+            service: worker
+            verb: start
+          - action: poll
+            ref: a
+            expect:
+              json:
+                state: CANCELLED
+                reason: PROCESSING_TIMEOUT
+          - action: submit
+            student: 1002
+            course: 101
+            poll: true
+            final:
+              json:
+                state: SUCCESS
+      - id: CHAOS-002
+        title: 停 Kafka 观察积压（人工）
+        automated: false
+        tags: [chaos, manual]
+        steps: []
