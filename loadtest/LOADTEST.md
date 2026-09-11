@@ -15,12 +15,14 @@
 | API | 2.0 | 1Gi | `-Xms512m -Xmx512m`，元空间 128m，`ActiveProcessorCount=2` | 被测入口（Gateway） |
 | Admission | 2.0 | 1Gi | 与 API 完全相同 | Dubbo 受理：Lua + `accept()` 写库；**不**消费 Kafka |
 | Worker | 2.0 | 1Gi | 与 API 完全相同 | Outbox 发布 + `confirm()` 落库；**不**接 Dubbo |
-| MySQL | 2.0 | 1Gi | `innodb-buffer-pool-size=256M`，`max-connections=80` | 数据面，单独配额，不从 Java 偷核 |
+| MySQL | 4.0 | 2Gi | `innodb-buffer-pool-size=512M`，`max-connections=80`，`innodb-flush-log-at-trx-commit=2` | 数据面；`flush=2` 是本机吞吐档，不是生产双 1 |
 | Redis | 1.0 | 256Mi | `maxmemory 128mb`，`noeviction` | 预占与限流 |
 | Kafka | 1.0 | 768Mi | `KAFKA_HEAP_OPTS=-Xms256m -Xmx256m` | 异步管道 |
 | k6 | 4.0 | 2Gi | 容器内访问 `http://api:18080` | 发生器与被测隔离；breaking 需要更多 VU，配额大于被测 Java |
 
-合计约 **12 CPU / 5.5Gi**（相对 2026-09-10 基线，domain 从 1 个 2 核进程拆成受理+确认各 2 核；MySQL/Kafka/Redis 配额不变）。请保证 Docker Desktop 的 Linux VM **不少于 14 CPU、10Gi**，否则配额会被宿主机再截一次，实验不公平。
+合计约 **14 CPU / 6.5Gi**（Java 仍是受理+确认各 2 核；MySQL overlay 为 4 核 / 2Gi / `flush=2`）。请保证 Docker Desktop 的 Linux VM **不少于 16 CPU、10Gi**，否则配额会被宿主机再截一次，实验不公平。
+
+本机实测工作点（不是生产口径）：落库跟上大约 **400**；500 能进队；把 confirm 收到 6、落库封在 ~240 时受理能到 **800**。不要把 800 写成完整选课。
 
 1a 实验问的是：500 hold 下落库能否从约 47 回到 100+。多出来的 2 核是确认侧独占，不是给 Kafka/MySQL 加配额。解读时不要把「拆进程」和「给确认加核」完全拆开；要对照的是同压力下 pending 是否还被受理写库挤瘦。
 
@@ -40,10 +42,10 @@
 | 学生 | `20001-24000`（4000 人，每人独立学期行） |
 | 课程 201 | 100000 名额，测吞吐，避免过早售罄 |
 | 课程 202 | 50 名额，测并发超卖边界 |
-| 提交限流 | 每学生 100/s，全局 5000/s |
-| 查询限流 | 每学生 200/s，全局 5000/s |
+| 提交限流 | 每学生 100/s，**全局 150/s**（本机 2 核 MySQL 运行点：受理不崩、落库能跟上、终态平均等待按 3s 设计） |
+| 查询限流 | 每学生 200/s，全局 100000/s |
 
-演示默认仍是每学生 5/s、全局 200/s。压测必须用 overlay，否则测到的是保护阀而不是系统。
+容量探针曾把全局提交放到 100000，用来找 500 受理上限；那不是这个配额的运行点。演示默认仍是每学生 5/s、全局 200/s。
 
 Tomcat 最大线程 64、Hikari 16：与 2 核匹配，避免默认 200 工作线程在 2 核上过度切换。
 

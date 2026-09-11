@@ -1,5 +1,8 @@
 package dev.demo.selection.infrastructure;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.demo.selection.Settings;
 import dev.demo.selection.domain.Course;
 import dev.demo.selection.domain.Selection;
@@ -18,17 +21,20 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class ReservationStore {
+    private static final TypeReference<List<Course>> COURSES = new TypeReference<>() {};
     private final StringRedisTemplate redis;
     private final Settings settings;
+    private final ObjectMapper json;
     private final DefaultRedisScript<String> reserve = script("reserve", String.class);
     private final DefaultRedisScript<String> settle = script("settle", String.class);
     private final DefaultRedisScript<Long> rate = script("rate_limit", Long.class);
     private final DefaultRedisScript<Long> repair = script("enqueue_repair", Long.class);
     private final DefaultRedisScript<Long> cache = script("cache_result", Long.class);
 
-    public ReservationStore(StringRedisTemplate redis, Settings settings) {
+    public ReservationStore(StringRedisTemplate redis, Settings settings, ObjectMapper json) {
         this.redis = redis;
         this.settings = settings;
+        this.json = json;
     }
 
     public String key(long term, String suffix) { return "selection:{" + term + "}:" + suffix; }
@@ -120,7 +126,42 @@ public class ReservationStore {
         for (Course course : courses) {
             redis.opsForValue().setIfAbsent(key(term, "stock:" + course.id()), Integer.toString(course.remaining()));
         }
+        saveCatalog(term, courses);
         redis.opsForValue().set(key(term, "ready"), "ready");
+    }
+
+    public Optional<List<Course>> catalog(long term) {
+        String payload = redis.opsForValue().get(key(term, "catalog"));
+        if (payload == null || payload.isBlank()) return Optional.empty();
+        try {
+            return Optional.of(json.readValue(payload, COURSES));
+        } catch (JsonProcessingException e) {
+            redis.delete(key(term, "catalog"));
+            return Optional.empty();
+        }
+    }
+
+    public void saveCatalog(long term, List<Course> courses) {
+        if (courses.isEmpty()) return;
+        try {
+            redis.opsForValue().setIfAbsent(key(term, "catalog"), json.writeValueAsString(courses));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Cannot serialize course catalog", e);
+        }
+    }
+
+    public void deleteCatalog(long term) {
+        redis.delete(key(term, "catalog"));
+    }
+
+    public Optional<Boolean> catalogMode(long term) {
+        String mode = redis.opsForValue().get(key(term, "mode"));
+        if (mode == null || mode.isBlank()) return Optional.empty();
+        return Optional.of("frozen".equals(mode));
+    }
+
+    public void saveCatalogMode(long term, boolean frozen) {
+        redis.opsForValue().set(key(term, "mode"), frozen ? "frozen" : "open");
     }
 
     private int jitter() {

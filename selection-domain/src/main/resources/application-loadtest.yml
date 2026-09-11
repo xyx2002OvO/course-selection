@@ -34,6 +34,7 @@ app:
   student-from: ${STUDENT_FROM:20001}
   student-to: ${STUDENT_TO:80000}
   submit-per-student: ${SUBMIT_PER_STUDENT:100}
-  submit-global: ${SUBMIT_GLOBAL:5000}
+  submit-global: ${SUBMIT_GLOBAL:150}
   query-per-student: ${QUERY_PER_STUDENT:200}
   query-global: ${QUERY_GLOBAL:5000}
+  catalog-frozen: ${CATALOG_FROZEN:true}

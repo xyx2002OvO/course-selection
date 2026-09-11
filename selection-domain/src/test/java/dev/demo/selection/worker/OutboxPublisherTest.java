@@ -24,7 +24,7 @@ class OutboxPublisherTest {
     @SuppressWarnings("unchecked")
     private final KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
     private final Settings settings = new Settings(true, true, false, "demo", 202601, 120, 30, 86400, 50,
-            1001, 1005, 5, 200, 10, 1000, 50, 300);
+            1001, 1005, 5, 200, 10, 1000, 50, 300, false);
     private OutboxPublisher publisher;
 
     @BeforeEach

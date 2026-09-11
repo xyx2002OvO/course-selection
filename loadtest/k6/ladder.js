@@ -27,6 +27,16 @@ const pieces = [
   { dur: 20, rate: 400, name: 'hold-400', score: true },
   { dur: 10, rate: 500, name: 'ramp-500', score: false },
   { dur: 30, rate: 500, name: 'hold-500', score: true },
+  { dur: 8, rate: 600, name: 'ramp-600', score: false },
+  { dur: 20, rate: 600, name: 'hold-600', score: true },
+  { dur: 8, rate: 700, name: 'ramp-700', score: false },
+  { dur: 20, rate: 700, name: 'hold-700', score: true },
+  { dur: 8, rate: 800, name: 'ramp-800', score: false },
+  { dur: 20, rate: 800, name: 'hold-800', score: true },
+  { dur: 8, rate: 900, name: 'ramp-900', score: false },
+  { dur: 20, rate: 900, name: 'hold-900', score: true },
+  { dur: 8, rate: 1000, name: 'ramp-1000', score: false },
+  { dur: 20, rate: 1000, name: 'hold-1000', score: true },
 ];
 
 export const options = {
@@ -36,8 +46,8 @@ export const options = {
       executor: 'ramping-arrival-rate',
       startRate: 50,
       timeUnit: '1s',
-      preAllocatedVUs: 200,
-      maxVUs: 800,
+      preAllocatedVUs: 400,
+      maxVUs: 1500,
       gracefulStop: '5s',
       stages: pieces.map((p) => ({ duration: `${p.dur}s`, target: p.rate })),
     },
@@ -175,7 +185,6 @@ export function handleSummary(data) {
   for (const row of stages) {
     if (row.held) maxHeld = row.target_rps;
   }
-  const hold500 = stages.find((s) => s.target_rps === 500);
   const report = {
     scenario: 'ladder-dispersed',
     course_from: env.courseFrom,
@@ -183,7 +192,6 @@ export function handleSummary(data) {
     student_from: env.studentFrom,
     student_to: env.studentTo,
     max_held_qps: maxHeld,
-    held_500: Boolean(hold500 && hold500.held),
     dropped_iterations: data.metrics.dropped_iterations ? metricCount(data.metrics.dropped_iterations) : 0,
     stages,
   };
@@ -203,8 +211,7 @@ function textReport(report) {
     '',
     '=== 阶梯分散选课受理 ===',
     `课程 ${report.course_from}-${report.course_to}，学生 ${report.student_from}-${report.student_to}`,
-    `最高稳住受理 QPS: ${report.max_held_qps}`,
-    `500 QPS 台阶是否稳住: ${report.held_500 ? '是' : '否'}`,
+    `最高稳住受理 QPS: ${report.max_held_qps}（k6 stage 标签若为空，以 database.csv 窗口为准）`,
     `dropped_iterations=${report.dropped_iterations}`,
     '台阶 (仅 hold；受理=202/200；429/409 单独计，不算系统崩溃):',
   ];

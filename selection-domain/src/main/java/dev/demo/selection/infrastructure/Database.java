@@ -59,6 +59,18 @@ public class Database {
                 .stream().findFirst();
     }
 
+    public Optional<Boolean> catalogFrozen(long term) {
+        return jdbc.query("SELECT frozen FROM term_catalog WHERE term_id=?",
+                (rs, n) -> rs.getBoolean(1), term).stream().findFirst();
+    }
+
+    public void saveCatalogFrozen(long term, boolean frozen) {
+        jdbc.update("""
+            INSERT INTO term_catalog(term_id,frozen) VALUES (?,?)
+            ON DUPLICATE KEY UPDATE frozen=VALUES(frozen)
+            """, term, frozen);
+    }
+
     public List<Course> enrolled(long student, long term) {
         return jdbc.query("""
             SELECT c.* FROM enrollment e JOIN course c ON c.id=e.course_id AND c.term_id=e.term_id

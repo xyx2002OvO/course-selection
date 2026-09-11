@@ -9,7 +9,7 @@ services:
   web:
     environment:
       SPRING_PROFILES_ACTIVE: loadtest
-      SUBMIT_GLOBAL: "100000"
+      SUBMIT_GLOBAL: ${SUBMIT_GLOBAL:-150}
       QUERY_GLOBAL: "100000"
       STUDENT_FROM: "20001"
       STUDENT_TO: "80000"
@@ -17,7 +17,7 @@ services:
   admission:
     environment:
       SPRING_PROFILES_ACTIVE: loadtest
-      SUBMIT_GLOBAL: "100000"
+      SUBMIT_GLOBAL: ${SUBMIT_GLOBAL:-150}
       QUERY_GLOBAL: "100000"
       STUDENT_FROM: "20001"
       STUDENT_TO: "80000"
@@ -33,6 +33,16 @@ services:
   init:
     environment:
       SPRING_PROFILES_ACTIVE: loadtest
+  mysql:
+    cpus: 4.0
+    mem_limit: 2g
+    mem_reservation: 2g
+    command:
+      [
+        "--innodb-buffer-pool-size=512M",
+        "--max-connections=80",
+        "--innodb-flush-log-at-trx-commit=2",
+      ]
   loadgen:
     image: grafana/k6:0.57.0
     cpus: 4.0

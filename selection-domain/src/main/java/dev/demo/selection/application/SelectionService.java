@@ -3,6 +3,8 @@ package dev.demo.selection.application;
 import dev.demo.selection.domain.Selection;
 import dev.demo.selection.domain.Selection.State;
 import dev.demo.selection.domain.SelectionRules;
+import dev.demo.selection.infrastructure.CatalogMode;
+import dev.demo.selection.infrastructure.CourseBloom;
 import dev.demo.selection.infrastructure.Database;
 import java.time.Instant;
 import java.util.UUID;
@@ -14,10 +16,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class SelectionService {
     private final Database db;
     private final SelectionRules rules;
+    private final CourseBloom courses;
+    private final CatalogMode mode;
 
-    public SelectionService(Database db, SelectionRules rules) {
+    public SelectionService(Database db, SelectionRules rules, CourseBloom courses, CatalogMode mode) {
         this.db = db;
         this.rules = rules;
+        this.courses = courses;
+        this.mode = mode;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 10)
@@ -41,7 +47,9 @@ public class SelectionService {
         var credits = db.lockStudent(s.studentId(), s.termId());
         if (credits.isEmpty()) return db.finish(s, State.REJECTED, "STUDENT_NOT_ELIGIBLE");
         // READ_COMMITTED plus the student row lock makes all rule reads follow the preceding commit.
-        var target = db.course(s.courseId(), s.termId()).orElse(null);
+        var target = (mode.frozen()
+                ? courses.course(s.courseId(), s.termId())
+                : db.course(s.courseId(), s.termId())).orElse(null);
         if (target == null) return db.finish(s, State.REJECTED, "COURSE_NOT_FOUND");
         String rejection = rules.rejection(target, db.enrolled(s.studentId(), s.termId()),
                 credits.get(), db.passed(s.studentId()));

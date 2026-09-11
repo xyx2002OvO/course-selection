@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import dev.demo.selection.application.SelectionService;
 import dev.demo.selection.domain.Selection;
 import dev.demo.selection.domain.Selection.State;
+import dev.demo.selection.infrastructure.CatalogMode;
 import dev.demo.selection.infrastructure.CourseBloom;
 import dev.demo.selection.infrastructure.ReservationStore;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -18,23 +19,32 @@ class SelectionRpcImplTest {
     private final ReservationStore store = mock(ReservationStore.class);
     private final SelectionService service = mock(SelectionService.class);
     private final CourseBloom bloom = mock(CourseBloom.class);
-    private final SelectionRpcImpl rpc = new SelectionRpcImpl(store, service, bloom, new SimpleMeterRegistry());
+    private final CatalogMode mode = new CatalogMode();
+    private final SelectionRpcImpl rpc = new SelectionRpcImpl(store, service, bloom, mode, new SimpleMeterRegistry());
 
     @Test
     void busyStudentDoesNotAccept() {
-        when(bloom.mightContain(101)).thenReturn(true);
         when(store.allow(202601, 1001, false)).thenReturn(true);
         when(store.reserve(any(), eq(1001L), eq(202601L), eq(101L))).thenReturn("STUDENT_BUSY");
         SubmitResult result = rpc.submit(new SubmitCommand(UUID.randomUUID(), 1001, 202601, 101));
         assertThat(result.getCode()).isEqualTo("STUDENT_BUSY");
         verify(service, never()).accept(any());
+        verify(bloom, never()).mightContain(anyLong());
+    }
+
+    @Test
+    void frozenUnknownCourseIsRejectedWithoutReserve() {
+        mode.setFrozen(true);
+        when(bloom.mightContain(101)).thenReturn(false);
+        SubmitResult result = rpc.submit(new SubmitCommand(UUID.randomUUID(), 1001, 202601, 101));
+        assertThat(result.getCode()).isEqualTo("COURSE_UNKNOWN");
+        verify(store, never()).reserve(any(), anyLong(), anyLong(), anyLong());
     }
 
     @Test
     void reservedRequestIsAccepted() {
         UUID id = UUID.randomUUID();
         Selection reservation = new Selection(id, 1001, 202601, 101, State.ACCEPTED, "", Instant.now().plusSeconds(60));
-        when(bloom.mightContain(101)).thenReturn(true);
         when(store.allow(202601, 1001, false)).thenReturn(true);
         when(store.reserve(id, 1001, 202601, 101)).thenReturn("RESERVED");
         when(store.reservation(202601, id)).thenReturn(Optional.of(reservation));

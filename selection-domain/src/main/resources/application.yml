@@ -12,6 +12,7 @@ spring:
         enabled: ${NACOS_CONFIG_ENABLED:true}
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
         file-extension: yaml
+        refresh-enabled: true
       discovery:
         enabled: ${NACOS_DISCOVERY_ENABLED:true}
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
@@ -99,3 +100,4 @@ app:
   query-global: ${QUERY_GLOBAL:1000}
   hotspot-per-course: ${HOTSPOT_PER_COURSE:50}
   status-ttl-jitter-seconds: ${STATUS_TTL_JITTER_SECONDS:300}
+  catalog-frozen: ${CATALOG_FROZEN:false}

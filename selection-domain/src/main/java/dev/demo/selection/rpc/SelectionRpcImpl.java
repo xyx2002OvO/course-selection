@@ -6,6 +6,7 @@ import com.alibaba.csp.sentinel.SphU;
 import com.alibaba.csp.sentinel.slots.block.BlockException;
 import dev.demo.selection.application.SelectionService;
 import dev.demo.selection.domain.Selection;
+import dev.demo.selection.infrastructure.CatalogMode;
 import dev.demo.selection.infrastructure.CourseBloom;
 import dev.demo.selection.infrastructure.HotspotRules;
 import dev.demo.selection.infrastructure.ReservationStore;
@@ -18,12 +19,15 @@ public class SelectionRpcImpl implements SelectionRpc {
     private final ReservationStore store;
     private final SelectionService service;
     private final CourseBloom bloom;
+    private final CatalogMode mode;
     private final Timer accept;
 
-    public SelectionRpcImpl(ReservationStore store, SelectionService service, CourseBloom bloom, MeterRegistry meters) {
+    public SelectionRpcImpl(ReservationStore store, SelectionService service, CourseBloom bloom,
+                            CatalogMode mode, MeterRegistry meters) {
         this.store = store;
         this.service = service;
         this.bloom = bloom;
+        this.mode = mode;
         this.accept = Timer.builder("selection.accept.duration")
                 .description("accept() including connection acquire, SQL, and commit")
                 .register(meters);
@@ -31,7 +35,7 @@ public class SelectionRpcImpl implements SelectionRpc {
 
     @Override
     public SubmitResult submit(SubmitCommand command) {
-        if (!bloom.mightContain(command.getCourseId())) {
+        if (mode.frozen() && !bloom.mightContain(command.getCourseId())) {
             return SubmitResult.rejected("COURSE_UNKNOWN");
         }
         Entry entry = null;
