@@ -15,7 +15,7 @@
 | API | 2.0 | 1Gi | `-Xms512m -Xmx512m`，元空间 128m，`ActiveProcessorCount=2` | 被测入口（Gateway） |
 | Admission | 2.0 | 1Gi | 与 API 完全相同 | Dubbo 受理：Lua + `accept()` 写库；**不**消费 Kafka |
 | Worker | 2.0 | 1Gi | 与 API 完全相同 | Outbox 发布 + `confirm()` 落库；**不**接 Dubbo |
-| MySQL | 4.0 | 2Gi | `innodb-buffer-pool-size=512M`，`max-connections=80`，`innodb-flush-log-at-trx-commit=2` | 数据面；`flush=2` 是本机吞吐档，不是生产双 1 |
+| MySQL | 4.0 | 2Gi | `innodb-buffer-pool-size=512M`，`max-connections=80`，`innodb-flush-log-at-trx-commit=2` | 数据面；刷盘与生产一致（`flush=2`） |
 | Redis | 1.0 | 256Mi | `maxmemory 128mb`，`noeviction` | 预占与限流 |
 | Kafka | 1.0 | 768Mi | `KAFKA_HEAP_OPTS=-Xms256m -Xmx256m` | 异步管道 |
 | k6 | 4.0 | 2Gi | 容器内访问 `http://api:18080` | 发生器与被测隔离；breaking 需要更多 VU，配额大于被测 Java |

@@ -101,3 +101,4 @@ app:
   hotspot-per-course: ${HOTSPOT_PER_COURSE:50}
   status-ttl-jitter-seconds: ${STATUS_TTL_JITTER_SECONDS:300}
   catalog-frozen: ${CATALOG_FROZEN:false}
+  sync-baseline: ${SYNC_BASELINE:false}

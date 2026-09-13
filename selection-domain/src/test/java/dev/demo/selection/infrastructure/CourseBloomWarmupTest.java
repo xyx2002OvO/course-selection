@@ -12,7 +12,7 @@ import org.springframework.mock.env.MockEnvironment;
 
 class CourseBloomWarmupTest {
     private final Settings settings = new Settings(true, true, false, "demo", 202601, 120, 30, 86400, 50,
-            1001, 1005, 5, 200, 10, 1000, 50, 300, false);
+            1001, 1005, 5, 200, 10, 1000, 50, 300, false, false);
     private final List<Course> java = List.of(new Course(101, 202601, "Java", 2, 3, 1, 1, 3, null, null));
 
     @Test void unfrozenDoesNotLoadCatalogCache() {

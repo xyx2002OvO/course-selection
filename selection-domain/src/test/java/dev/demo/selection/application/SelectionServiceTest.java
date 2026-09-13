@@ -88,6 +88,24 @@ class SelectionServiceTest {
         verify(db,never()).decrement(anyLong(),anyLong());
     }
 
+    @Test void syncEnrollDoesNotWriteCommandOutbox() {
+        Selection s = selection(State.ACCEPTED, Instant.now().plusSeconds(60));
+        Selection done = new Selection(s.requestId(), s.studentId(), s.termId(), s.courseId(), State.SUCCESS, "",
+                s.deadline());
+        when(db.lockRequest(s.requestId())).thenReturn(s);
+        when(db.lockStudent(1001, 202601)).thenReturn(Optional.of(8));
+        when(db.course(101, 202601)).thenReturn(Optional.of(new Course(101, 202601, "Target", 2, 3, 1, 1, 3, null, null)));
+        when(db.enrolled(1001, 202601)).thenReturn(List.of());
+        when(db.passed(1001)).thenReturn(java.util.Set.of());
+        when(db.decrement(101, 202601)).thenReturn(true);
+        when(db.finish(s, State.SUCCESS, "", false)).thenReturn(done);
+        assertThat(service.enrollSync(s).state()).isEqualTo(State.SUCCESS);
+        verify(db).insertRequest(s);
+        verify(db, never()).event(any(), eq("COMMAND"));
+        verify(db).finish(s, State.SUCCESS, "", false);
+        verify(db, never()).finish(eq(s), eq(State.SUCCESS), eq(""));
+    }
+
     @Test void cancellationPreservesCommittedSuccess() {
         Selection old = selection(State.SUCCESS,Instant.now().minusSeconds(1));
         when(db.lockRequest(old.requestId())).thenReturn(old);

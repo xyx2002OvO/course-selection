@@ -40,23 +40,43 @@ public class SelectionService {
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 10)
+    public Selection enrollSync(Selection reservation) {
+        db.insertRequest(reservation);
+        Selection current = db.lockRequest(reservation.requestId());
+        current.requireIdentity(reservation.studentId(), reservation.termId(), reservation.courseId());
+        if (current.state().terminal()) return current;
+        if (!current.deadline().isAfter(Instant.now())) {
+            return complete(current, State.CANCELLED, "PROCESSING_TIMEOUT", false);
+        }
+        return confirmLocked(current, false);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 10)
     public Selection confirm(UUID id) {
         Selection s = db.lockRequest(id);
         if (s.state().terminal()) return s;
         if (!s.deadline().isAfter(Instant.now())) return db.finish(s, State.CANCELLED, "PROCESSING_TIMEOUT");
+        return confirmLocked(s, true);
+    }
+
+    private Selection confirmLocked(Selection s, boolean writeOutbox) {
         var credits = db.lockStudent(s.studentId(), s.termId());
-        if (credits.isEmpty()) return db.finish(s, State.REJECTED, "STUDENT_NOT_ELIGIBLE");
+        if (credits.isEmpty()) return complete(s, State.REJECTED, "STUDENT_NOT_ELIGIBLE", writeOutbox);
         // READ_COMMITTED plus the student row lock makes all rule reads follow the preceding commit.
         var target = (mode.frozen()
                 ? courses.course(s.courseId(), s.termId())
                 : db.course(s.courseId(), s.termId())).orElse(null);
-        if (target == null) return db.finish(s, State.REJECTED, "COURSE_NOT_FOUND");
+        if (target == null) return complete(s, State.REJECTED, "COURSE_NOT_FOUND", writeOutbox);
         String rejection = rules.rejection(target, db.enrolled(s.studentId(), s.termId()),
                 credits.get(), db.passed(s.studentId()));
-        if (!rejection.isEmpty()) return db.finish(s, State.REJECTED, rejection);
-        if (!db.decrement(s.courseId(), s.termId())) return db.finish(s, State.REJECTED, "SOLD_OUT");
+        if (!rejection.isEmpty()) return complete(s, State.REJECTED, rejection, writeOutbox);
+        if (!db.decrement(s.courseId(), s.termId())) return complete(s, State.REJECTED, "SOLD_OUT", writeOutbox);
         db.enroll(s);
-        return db.finish(s, State.SUCCESS, "");
+        return complete(s, State.SUCCESS, "", writeOutbox);
+    }
+
+    private Selection complete(Selection s, State state, String reason, boolean writeOutbox) {
+        return writeOutbox ? db.finish(s, state, reason) : db.finish(s, state, reason, false);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 10)

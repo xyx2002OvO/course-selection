@@ -4,6 +4,7 @@ import com.alibaba.csp.sentinel.Entry;
 import com.alibaba.csp.sentinel.EntryType;
 import com.alibaba.csp.sentinel.SphU;
 import com.alibaba.csp.sentinel.slots.block.BlockException;
+import dev.demo.selection.Settings;
 import dev.demo.selection.application.SelectionService;
 import dev.demo.selection.domain.Selection;
 import dev.demo.selection.infrastructure.CatalogMode;
@@ -20,14 +21,16 @@ public class SelectionRpcImpl implements SelectionRpc {
     private final SelectionService service;
     private final CourseBloom bloom;
     private final CatalogMode mode;
+    private final Settings settings;
     private final Timer accept;
 
     public SelectionRpcImpl(ReservationStore store, SelectionService service, CourseBloom bloom,
-                            CatalogMode mode, MeterRegistry meters) {
+                            CatalogMode mode, Settings settings, MeterRegistry meters) {
         this.store = store;
         this.service = service;
         this.bloom = bloom;
         this.mode = mode;
+        this.settings = settings;
         this.accept = Timer.builder("selection.accept.duration")
                 .description("accept() including connection acquire, SQL, and commit")
                 .register(meters);
@@ -76,7 +79,12 @@ public class SelectionRpcImpl implements SelectionRpc {
     private SubmitResult accept(SubmitCommand command) {
         Selection reservation = store.reservation(command.getTermId(), command.getRequestId()).orElseThrow();
         try {
-            Selection accepted = accept.record(() -> service.accept(reservation));
+            Selection accepted = accept.record(() -> settings.syncBaseline()
+                    ? service.enrollSync(reservation)
+                    : service.accept(reservation));
+            if (settings.syncBaseline() && accepted.state().terminal()) {
+                store.project(accepted);
+            }
             String state = accepted.state().terminal() ? accepted.state().name() : "PROCESSING";
             return new SubmitResult("OK", accepted.requestId(), state, accepted.reason());
         } catch (IllegalArgumentException e) {

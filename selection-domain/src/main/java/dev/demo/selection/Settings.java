@@ -10,5 +10,5 @@ public record Settings(boolean apiEnabled, boolean workerEnabled, boolean bootst
                        int submitPerStudent, int submitGlobal,
                        int queryPerStudent, int queryGlobal,
                        int hotspotPerCourse, int statusTtlJitterSeconds,
-                       boolean catalogFrozen) {
+                       boolean catalogFrozen, boolean syncBaseline) {
 }

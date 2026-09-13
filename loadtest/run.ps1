@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('submit', 'e2e', 'oversell', 'breaking', 'pipeline', 'ladder', 'correctness', 'all')]
+    [ValidateSet('submit', 'e2e', 'oversell', 'breaking', 'pipeline', 'ladder', 'correctness', 'latency-compare', 'all')]
     [string]$Scenario = 'all',
     [switch]$Rebuild,
     [switch]$SkipReset,
@@ -79,7 +79,7 @@ function Invoke-Script([string]$Script, [string]$OutDir) {
     $stopFlag = Join-Path $OutDir 'stop-watch'
     Remove-Item $stopFlag, (Join-Path $OutDir 'first-failure.json') -ErrorAction SilentlyContinue
     $watchers = @()
-    if ($Script -eq 'breaking.js' -or $Script -eq 'pipeline.js' -or $Script -eq 'ladder.js' -or $Script -eq 'correctness.js') {
+    if ($Script -eq 'breaking.js' -or $Script -eq 'pipeline.js' -or $Script -eq 'ladder.js' -or $Script -eq 'correctness.js' -or $Script -eq 'latency-compare.js') {
         $watchers += Start-Process -FilePath 'powershell.exe' -PassThru -WindowStyle Hidden -ArgumentList @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass',
             '-File', "$PSScriptRoot\watch-instances.ps1",
@@ -92,6 +92,9 @@ function Invoke-Script([string]$Script, [string]$OutDir) {
         )
     }
     $k6Args = "run --summary-export=/out/k6-summary.json /scripts/$Script"
+    if ($Script -eq 'latency-compare.js') {
+        $k6Args = "run --summary-export=/out/k6-summary.json --out csv=/out/http.csv /scripts/$Script"
+    }
     $k6Log = Join-Path $OutDir 'k6.log'
     try {
         cmd.exe /c "docker compose -f compose.yaml -f compose.loadtest.yaml --profile loadgen run --rm --no-deps loadgen $k6Args > `"$k6Log`" 2>&1"
@@ -157,6 +160,39 @@ if ($CompareConfirm) {
         Invoke-Script 'pipeline.js' $outDir
     }
     & "$PSScriptRoot\summarize-confirm.ps1" -Stamp $stamp
+    return
+}
+
+if ($Scenario -eq 'latency-compare') {
+    $env:SUBMIT_GLOBAL = '100000'
+    $env:CONFIRM_CONCURRENCY = '6'
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $built = $false
+    foreach ($mode in @('async', 'sync')) {
+        $env:SYNC_BASELINE = $(if ($mode -eq 'sync') { 'true' } else { 'false' })
+        $runId = "$stamp-latency-$mode"
+        $outDir = Join-Path $root "loadtest\out\$runId\pipeline"
+        $env:LOADTEST_OUT = "./loadtest/out/$runId/pipeline"
+        New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+        @{
+            scenario = 'latency-compare'
+            mode = $mode
+            syncBaseline = ($mode -eq 'sync')
+            confirmConcurrency = 6
+            submitGlobal = 100000
+            httpTimeout = '8s'
+            ladderTo = 1000
+            pairing = 'rotate-course-on-student-pass'
+            courseFrom = 211
+            courseTo = 230
+            mysqlCpus = 4
+            innodbFlushLogAtTrxCommit = 2
+        } | ConvertTo-Json | Set-Content (Join-Path $root "loadtest\out\$runId\run-metadata.json")
+        Start-Stack -Build:($Rebuild -and -not $built)
+        $built = $true
+        Invoke-Script 'latency-compare.js' $outDir
+    }
+    Write-Output "Latency compare done. async=$stamp-latency-async sync=$stamp-latency-sync"
     return
 }
 

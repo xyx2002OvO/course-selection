@@ -94,11 +94,15 @@ public class Database {
     }
 
     public Selection finish(Selection old, State state, String reason) {
+        return finish(old, state, reason, true);
+    }
+
+    public Selection finish(Selection old, State state, String reason, boolean writeOutbox) {
         jdbc.update("UPDATE selection_request SET state=?,reason=?,updated_at=CURRENT_TIMESTAMP(6) WHERE request_id=?",
                 state.name(), reason, old.requestId().toString());
         Selection result = new Selection(old.requestId(), old.studentId(), old.termId(), old.courseId(),
                 state, reason, old.deadline());
-        event(result, "RESULT");
+        if (writeOutbox) event(result, "RESULT");
         return result;
     }
 

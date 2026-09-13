@@ -22,6 +22,7 @@ services:
       STUDENT_FROM: "20001"
       STUDENT_TO: "80000"
       MANAGEMENT_PORT: "18093"
+      SYNC_BASELINE: ${SYNC_BASELINE:-false}
     ports: ["127.0.0.1:18093:18093"]
   worker:
     environment:
@@ -61,6 +62,7 @@ services:
       COURSE_SCARCE: "202"
       COURSE_FROM: "211"
       COURSE_TO: "230"
+      SYNC_BASELINE: ${SYNC_BASELINE:-false}
     profiles: ["loadgen"]
     depends_on:
       api: {condition: service_healthy}
