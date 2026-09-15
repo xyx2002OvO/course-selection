@@ -1,0 +1,51 @@
+# CDC overlay: Debezium reads outbox_event binlog instead of polling.
+# Keep MySQL / admission / worker quotas the same as poll; Connect is extra cost.
+services:
+  admission:
+    environment:
+      OUTBOX_PUBLISHER_ENABLED: "false"
+  worker:
+    environment:
+      OUTBOX_PUBLISHER_ENABLED: "false"
+  connect:
+    image: quay.io/debezium/connect:3.2
+    cpus: 2.0
+    mem_limit: 2g
+    mem_reservation: 2g
+    ports: ["127.0.0.1:18094:8083"]
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: selection-connect
+      CONFIG_STORAGE_TOPIC: selection_connect_configs
+      OFFSET_STORAGE_TOPIC: selection_connect_offsets
+      STATUS_STORAGE_TOPIC: selection_connect_status
+      CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx1024m
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8083'"]
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 40s
+    depends_on:
+      kafka: {condition: service_healthy}
+      mysql: {condition: service_healthy}
+      worker: {condition: service_healthy}
+  connect-init:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    volumes:
+      - ./loadtest/cdc/register.sh:/register.sh:ro
+      - ./loadtest/cdc/connector.json:/connector.json:ro
+    command: ["sh", "/register.sh"]
+    depends_on:
+      connect: {condition: service_healthy}
+  loadgen:
+    depends_on:
+      api: {condition: service_healthy}
+      admission: {condition: service_healthy}
+      worker: {condition: service_healthy}
+      connect-init: {condition: service_completed_successfully}

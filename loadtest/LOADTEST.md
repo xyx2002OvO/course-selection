@@ -60,8 +60,12 @@ Tomcat 最大线程 64、Hikari 16：与 2 核匹配，避免默认 200 工作�
 5. **ladder**：模拟学生分散选课的受理阶梯。课程 `211-230`（每门 10 万名额），学生 `20001-80000` 按迭代轮转、每人新幂等键。Sentinel 热点仍是每课 50 QPS，20 门课理论上限 1000 QPS，500 全局时每课约 25。台阶：预热 20s@50，之后 100/200/300/400 各 8s 爬升 + 20s hold，最后 10s 爬到 500 并 hold 30s。只打受理接口。**稳住**定义：该 hold 受理成功率 ≥ 98%、实现受理 QPS ≥ 目标的 95%、无连接失败、5xx < 2%。429 记为限流不是崩溃。本机 Docker 2 核配额下 500 是实验目标，不是容量承诺。
 
 ```powershell
-.\loadtest\run.cmd -Scenario ladder
+.\loadtest\run.cmd -Rebuild -Scenario ladder
+.\loadtest\run.cmd -Rebuild -CompareCdc   # poll Outbox vs Debezium CDC, confirm=12 ladder
+.\loadtest\run.cmd -Rebuild -Cdc -Scenario ladder
 ```
+
+`-CompareCdc` 两次 ladder 共用同一套 Java / MySQL / Kafka 配额；CDC 臂额外加 Debezium Connect **2 CPU / 2Gi**，并关掉 Worker 的 Outbox 轮询。两边都开 row binlog。看的是 hold-400/500 的 `ACCEPTED` 积压和 `SUCCESS` 落库，不是 HTTP 受理 QPS（受理不走 Publisher）。
 
 ## 怎么跑
 

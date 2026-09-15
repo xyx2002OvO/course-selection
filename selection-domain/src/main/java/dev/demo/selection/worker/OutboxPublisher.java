@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 @ConditionalOnProperty(name = "app.worker-enabled", havingValue = "true")
+@ConditionalOnProperty(name = "app.outbox-publisher-enabled", havingValue = "true", matchIfMissing = true)
 public class OutboxPublisher {
     private static final Logger log = LoggerFactory.getLogger(OutboxPublisher.class);
     private final OutboxRepository outbox;

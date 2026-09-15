@@ -40,14 +40,25 @@ services:
     cpus: 2.0
     mem_limit: 1g
     mem_reservation: 1g
-    command: ["--innodb-buffer-pool-size=256M", "--max-connections=80", "--innodb-flush-log-at-trx-commit=1"]
+    command:
+      [
+        "--innodb-buffer-pool-size=256M",
+        "--max-connections=80",
+        "--innodb-flush-log-at-trx-commit=1",
+        "--server-id=1",
+        "--log-bin=mysql-bin",
+        "--binlog-format=ROW",
+        "--binlog-row-image=FULL",
+      ]
     environment:
       MYSQL_DATABASE: selection
       MYSQL_USER: selection
       MYSQL_PASSWORD: selection-dev
       MYSQL_ROOT_PASSWORD: root-dev
     ports: ["127.0.0.1:13306:3306"]
-    volumes: ["mysql-data:/var/lib/mysql"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "mysql -h 127.0.0.1 -uselection -p$$MYSQL_PASSWORD selection -e 'SELECT 1' >/dev/null 2>&1"]
       interval: 5s

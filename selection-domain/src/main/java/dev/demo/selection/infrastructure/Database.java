@@ -109,9 +109,10 @@ public class Database {
     public void event(Selection s, String kind) {
         try {
             jdbc.update("""
-                INSERT INTO outbox_event(request_id,kind,message_key,payload) VALUES (?,?,?,?)
-                ON DUPLICATE KEY UPDATE request_id=request_id
-                """, s.requestId().toString(), kind, s.studentId() + ":" + s.termId(), json.writeValueAsString(s));
+                INSERT INTO outbox_event(request_id,kind,aggregatetype,message_key,payload)
+                VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE request_id=request_id
+                """, s.requestId().toString(), kind, "COMMAND".equals(kind) ? "requests" : "results",
+                    s.studentId() + ":" + s.termId(), json.writeValueAsString(s));
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Cannot serialize selection event", e);
         }

@@ -83,6 +83,7 @@ dubbo:
 app:
   api-enabled: false
   worker-enabled: ${WORKER_ENABLED:true}
+  outbox-publisher-enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
   bootstrap: ${BOOTSTRAP:false}
   demo-password: ${DEMO_PASSWORD:demo-pass}
   term: 202601

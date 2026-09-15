@@ -4,36 +4,56 @@ param(
     [switch]$Rebuild,
     [switch]$SkipReset,
     [switch]$CompareConfirm,
+    [switch]$Cdc,
+    [switch]$CompareCdc,
     [int]$ProjectConcurrency = 6
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
-$compose = @('-f', 'compose.yaml', '-f', 'compose.loadtest.yaml')
 if (-not $env:LOADTEST_OUT) { $env:LOADTEST_OUT = './loadtest/out' }
 if (-not $env:PROJECT_CONCURRENCY) { $env:PROJECT_CONCURRENCY = "$ProjectConcurrency" }
 if (-not $env:CONFIRM_CONCURRENCY) { $env:CONFIRM_CONCURRENCY = '6' }
 if (-not $env:SUBMIT_GLOBAL) { $env:SUBMIT_GLOBAL = '150' }
+$script:CdcEnabled = $false
+$script:compose = @('-f', 'compose.yaml', '-f', 'compose.loadtest.yaml')
+
+function Set-CdcMode([bool]$Enabled) {
+    $script:compose = @('-f', 'compose.yaml', '-f', 'compose.loadtest.yaml')
+    if ($Enabled) { $script:compose += @('-f', 'compose.cdc.yaml') }
+    $script:CdcEnabled = $Enabled
+}
 
 function Wait-Healthy {
-    $deadline = (Get-Date).AddMinutes(5)
+    $deadline = (Get-Date).AddMinutes(8)
     do {
         $api = docker inspect selection-demo-api-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>$null
         $admission = docker inspect selection-demo-admission-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>$null
         $worker = docker inspect selection-demo-worker-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>$null
-        if ($api -eq 'healthy' -and $admission -eq 'healthy' -and $worker -eq 'healthy') { return }
+        $ready = ($api -eq 'healthy' -and $admission -eq 'healthy' -and $worker -eq 'healthy')
+        if ($ready -and $script:CdcEnabled) {
+            $connect = docker inspect selection-demo-connect-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>$null
+            $init = docker inspect selection-demo-connect-init-1 --format '{{.State.Status}} {{.State.ExitCode}}' 2>$null
+            $connector = curl.exe -sf http://127.0.0.1:18094/connectors/selection-outbox/status 2>$null
+            $connectorOk = "$connector" -match '"state":"RUNNING"' -and "$connector" -match '"tasks"'
+            $initOk = "$init".Trim() -eq 'exited 0'
+            $ready = ($connect -eq 'healthy' -and ($initOk -or $connectorOk))
+        }
+        if ($ready) { return }
         Start-Sleep -Seconds 3
     } while ((Get-Date) -lt $deadline)
-    docker compose @compose ps -a
-    throw "api/admission/worker not healthy (api=$api admission=$admission worker=$worker)"
+    docker compose @script:compose ps -a
+    throw "stack not healthy (api=$api admission=$admission worker=$worker)"
 }
 
 function Start-Stack([switch]$Build) {
-    Write-Output "Resetting loadtest stack (confirm=$($env:CONFIRM_CONCURRENCY) project=$($env:PROJECT_CONCURRENCY) submitGlobal=$($env:SUBMIT_GLOBAL))."
-    cmd.exe /c "docker compose -f compose.yaml -f compose.loadtest.yaml --profile loadgen down -v"
+    $mode = $(if ($script:CdcEnabled) { 'cdc' } else { 'poll' })
+    Write-Output "Resetting loadtest stack mode=$mode confirm=$($env:CONFIRM_CONCURRENCY) project=$($env:PROJECT_CONCURRENCY) submitGlobal=$($env:SUBMIT_GLOBAL)."
+    $files = ($script:compose -join ' ')
+    cmd.exe /c "docker compose $files --profile loadgen down -v"
     if ($LASTEXITCODE -ne 0) { throw 'Cannot reset loadtest stack' }
-    $upCmd = 'docker compose -f compose.yaml -f compose.loadtest.yaml up -d'
-    if ($Build) { $upCmd = 'docker compose -f compose.yaml -f compose.loadtest.yaml up --build -d' }
+    $upCmd = "docker compose $files up -d"
+    if ($Build) { $upCmd = "docker compose $files up --build -d" }
     cmd.exe /c $upCmd
     if ($LASTEXITCODE -ne 0) { throw 'Cannot build/start loadtest stack' }
     Wait-Healthy
@@ -97,7 +117,7 @@ function Invoke-Script([string]$Script, [string]$OutDir) {
     }
     $k6Log = Join-Path $OutDir 'k6.log'
     try {
-        cmd.exe /c "docker compose -f compose.yaml -f compose.loadtest.yaml --profile loadgen run --rm --no-deps loadgen $k6Args > `"$k6Log`" 2>&1"
+        cmd.exe /c "docker compose $(( $script:compose -join ' ')) --profile loadgen run --rm --no-deps loadgen $k6Args > `"$k6Log`" 2>&1"
         Set-Content (Join-Path $OutDir 'k6-exit-code.txt') "$LASTEXITCODE"
         if (Test-Path $k6Log) { Get-Content $k6Log -Tail 35 }
     } catch {
@@ -124,8 +144,9 @@ function Invoke-Script([string]$Script, [string]$OutDir) {
         docker logs selection-demo-worker-1 --since 15m 2>&1 |
             Select-String -Pattern 'HikariPool|Connection is not available|SQLTimeout|Lock wait' |
             Set-Content (Join-Path $OutDir 'worker-wait-log.txt')
-        docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}} {{.MemPerc}}' `
-            selection-demo-api-1 selection-demo-admission-1 selection-demo-worker-1 selection-demo-mysql-1 selection-demo-redis-1 selection-demo-kafka-1 |
+        $statsNames = @('selection-demo-api-1','selection-demo-admission-1','selection-demo-worker-1','selection-demo-mysql-1','selection-demo-redis-1','selection-demo-kafka-1')
+        if ($script:CdcEnabled) { $statsNames += 'selection-demo-connect-1' }
+        docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}} {{.MemPerc}}' @statsNames |
             Set-Content (Join-Path $OutDir 'docker-stats.txt')
         $ErrorActionPreference = $previous
     }
@@ -196,10 +217,47 @@ if ($Scenario -eq 'latency-compare') {
     return
 }
 
+if ($CompareCdc) {
+    $env:SUBMIT_GLOBAL = '100000'
+    $env:CONFIRM_CONCURRENCY = '12'
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $built = $false
+    foreach ($mode in @('poll', 'cdc')) {
+        Set-CdcMode ($mode -eq 'cdc')
+        $runId = "$stamp-ladder-$mode-confirm12"
+        $outDir = Join-Path $root "loadtest\out\$runId\pipeline"
+        $env:LOADTEST_OUT = "./loadtest/out/$runId/pipeline"
+        New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+        @{
+            scenario = 'ladder'
+            outboxMode = $mode
+            confirmConcurrency = 12
+            projectConcurrency = $ProjectConcurrency
+            submitGlobal = 100000
+            courseFrom = 211
+            courseTo = 230
+            targetQps = 500
+            mysqlCpus = 4
+            mysqlMem = '2g'
+            innodbBufferPool = '512M'
+            innodbFlushLogAtTrxCommit = 2
+            connectCpus = $(if ($mode -eq 'cdc') { 2 } else { 0 })
+            connectMem = $(if ($mode -eq 'cdc') { '2g' } else { 'none' })
+        } | ConvertTo-Json | Set-Content (Join-Path $root "loadtest\out\$runId\run-metadata.json")
+        Start-Stack -Build:($Rebuild -and -not $built)
+        $built = $true
+        Invoke-Script 'ladder.js' $outDir
+    }
+    Write-Output "CDC compare done. poll=$stamp-ladder-poll-confirm12 cdc=$stamp-ladder-cdc-confirm12"
+    return
+}
+
 if ($SkipReset) {
     Write-Output 'SkipReset: keeping current stack, waiting until api/admission/worker are healthy.'
+    if (-not $CompareCdc) { Set-CdcMode ([bool]$Cdc) }
     Wait-Healthy
 } else {
+    if (-not $CompareCdc) { Set-CdcMode ([bool]$Cdc) }
     Start-Stack -Build:$Rebuild
 }
 
