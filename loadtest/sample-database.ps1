@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory)][string]$OutDir,
     [int]$AdmissionPort = 18093,
-    [int]$WorkerPort = 18091
+    [int]$WorkerPort = 18091,
+    [switch]$SkipWorker
 )
 $ErrorActionPreference = 'Stop'
 $stopFlag = Join-Path $OutDir 'stop-watch'
@@ -115,7 +116,9 @@ try {
                 ConvertTo-Json -Compress | Add-Content (Join-Path $OutDir 'mysql-wait-events.jsonl')
         }
 
-        foreach ($pair in @(@{ port = $AdmissionPort; names = $admissionMetrics }, @{ port = $WorkerPort; names = $workerMetrics })) {
+        $pairs = @(@{ port = $AdmissionPort; names = $admissionMetrics })
+        if (-not $SkipWorker) { $pairs += @{ port = $WorkerPort; names = $workerMetrics } }
+        foreach ($pair in $pairs) {
             foreach ($metric in $pair.names) {
                 try {
                     $value = Read-Metric $pair.port $metric

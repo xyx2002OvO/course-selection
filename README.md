@@ -133,7 +133,7 @@ mvn verify
 
 故障演练：`docker compose stop worker` 后提交申请，等待超过 120 秒再 `docker compose start worker`，申请应最终取消且名额恢复。停止 Kafka 可以观察 Outbox 积压及恢复；单节点开发环境中 Kafka 停机期间请求也可能按期限被取消，这是预期行为。
 
-压测实验的资源配额、三条场景和公平性约定见 [loadtest/LOADTEST.md](loadtest/LOADTEST.md)。API 与 Worker 固定 **2 CPU / 1Gi**，堆 **512m**，`ActiveProcessorCount=2`。
+压测实验的资源配额和场景见 [loadtest/LOADTEST.md](loadtest/LOADTEST.md)，本机配额结果见 [loadtest/REPORT-2026-09-15.md](loadtest/REPORT-2026-09-15.md)。API、Admission、Worker 各 **2 CPU / 1Gi**，堆 **512m**，`ActiveProcessorCount=2`。Nacos 运行点是全局提交 1000 QPS、每课热点 80 QPS。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\loadtest\run.ps1 -Rebuild -Scenario submit

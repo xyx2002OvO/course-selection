@@ -1,5 +1,6 @@
 param(
-    [string]$OutDir
+    [string]$OutDir,
+    [switch]$IgnoreWorker
 )
 $ErrorActionPreference = 'Continue'
 $stopFlag = Join-Path $OutDir 'stop-watch'
@@ -42,8 +43,11 @@ while (-not (Test-Path $stopFlag)) {
             $mem = $sp[1]
         }
         Add-Content -Encoding utf8 $csv "$now,$name,$status,$health,$oom,$cpu,$mem"
-        $core = $name -match 'api-1$|admission-1$|worker-1$|mysql-1$'
+        $isWorker = $name -match 'worker-1$'
+        $core = $name -match 'api-1$|admission-1$|mysql-1$'
+        if (-not $IgnoreWorker) { $core = $core -or $isWorker }
         $dead = ($status -in @('exited', 'dead', 'missing')) -or ($oom -eq 'true') -or ($status -eq 'restarting') -or ($core -and $health -eq 'unhealthy')
+        if ($IgnoreWorker -and $isWorker) { $dead = $false }
         if ($dead -and -not (Test-Path $fail)) {
             $payload = @{
                 time      = $now

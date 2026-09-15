@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('submit', 'e2e', 'oversell', 'breaking', 'pipeline', 'ladder', 'correctness', 'latency-compare', 'all')]
+    [ValidateSet('submit', 'e2e', 'oversell', 'breaking', 'pipeline', 'ladder', 'admit-high', 'correctness', 'latency-compare', 'all')]
     [string]$Scenario = 'all',
     [switch]$Rebuild,
     [switch]$SkipReset,
@@ -14,7 +14,9 @@ Set-Location $root
 if (-not $env:LOADTEST_OUT) { $env:LOADTEST_OUT = './loadtest/out' }
 if (-not $env:PROJECT_CONCURRENCY) { $env:PROJECT_CONCURRENCY = "$ProjectConcurrency" }
 if (-not $env:CONFIRM_CONCURRENCY) { $env:CONFIRM_CONCURRENCY = '6' }
-if (-not $env:SUBMIT_GLOBAL) { $env:SUBMIT_GLOBAL = '150' }
+if (-not $env:SUBMIT_GLOBAL) { $env:SUBMIT_GLOBAL = '1000' }
+if (-not $env:HOTSPOT_PER_COURSE) { $env:HOTSPOT_PER_COURSE = '80' }
+if ($Scenario -eq 'breaking') { $env:SUBMIT_GLOBAL = '100000' }
 $script:CdcEnabled = $false
 $script:compose = @('-f', 'compose.yaml', '-f', 'compose.loadtest.yaml')
 
@@ -99,17 +101,22 @@ function Invoke-Script([string]$Script, [string]$OutDir) {
     $stopFlag = Join-Path $OutDir 'stop-watch'
     Remove-Item $stopFlag, (Join-Path $OutDir 'first-failure.json') -ErrorAction SilentlyContinue
     $watchers = @()
-    if ($Script -eq 'breaking.js' -or $Script -eq 'pipeline.js' -or $Script -eq 'ladder.js' -or $Script -eq 'correctness.js' -or $Script -eq 'latency-compare.js') {
-        $watchers += Start-Process -FilePath 'powershell.exe' -PassThru -WindowStyle Hidden -ArgumentList @(
+    $needsWatch = $Script -eq 'breaking.js' -or $Script -eq 'pipeline.js' -or $Script -eq 'ladder.js' -or $Script -eq 'correctness.js' -or $Script -eq 'latency-compare.js' -or $Script -eq 'admit-high.js'
+    if ($needsWatch) {
+        $watchArgs = @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass',
             '-File', "$PSScriptRoot\watch-instances.ps1",
             '-OutDir', $OutDir
         )
-        $watchers += Start-Process -FilePath 'powershell.exe' -PassThru -WindowStyle Hidden -ArgumentList @(
+        if ($Script -eq 'admit-high.js') { $watchArgs += '-IgnoreWorker' }
+        $watchers += Start-Process -FilePath 'powershell.exe' -PassThru -WindowStyle Hidden -ArgumentList $watchArgs
+        $sampleArgs = @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass',
             '-File', "$PSScriptRoot\sample-database.ps1",
             '-OutDir', $OutDir
         )
+        if ($Script -eq 'admit-high.js') { $sampleArgs += '-SkipWorker' }
+        $watchers += Start-Process -FilePath 'powershell.exe' -PassThru -WindowStyle Hidden -ArgumentList $sampleArgs
     }
     $k6Args = "run --summary-export=/out/k6-summary.json /scripts/$Script"
     if ($Script -eq 'latency-compare.js') {
@@ -261,6 +268,11 @@ if ($SkipReset) {
     Start-Stack -Build:$Rebuild
 }
 
+if ($Scenario -eq 'admit-high') {
+    Write-Output 'Stopping worker so admission is not sharing MySQL with confirm().'
+    docker stop selection-demo-worker-1 | Out-Null
+}
+
 $scripts = switch ($Scenario) {
     'submit' { @('submit.js') }
     'e2e' { @('e2e.js') }
@@ -268,6 +280,7 @@ $scripts = switch ($Scenario) {
     'breaking' { @('breaking.js') }
     'pipeline' { @('pipeline.js') }
     'ladder' { @('ladder.js') }
+    'admit-high' { @('admit-high.js') }
     'correctness' { @('correctness.js') }
     default { @('submit.js', 'e2e.js', 'oversell.js') }
 }
@@ -275,7 +288,7 @@ $scripts = switch ($Scenario) {
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 foreach ($script in $scripts) {
     $name = [IO.Path]::GetFileNameWithoutExtension($script)
-    $outDir = if ($script -eq 'pipeline.js' -or $script -eq 'breaking.js' -or $script -eq 'ladder.js' -or $script -eq 'correctness.js') {
+    $outDir = if ($script -eq 'pipeline.js' -or $script -eq 'breaking.js' -or $script -eq 'ladder.js' -or $script -eq 'admit-high.js' -or $script -eq 'correctness.js') {
         $runId = "$stamp-$name-confirm$($env:CONFIRM_CONCURRENCY)"
         $env:LOADTEST_OUT = "./loadtest/out/$runId/pipeline"
         New-Item -ItemType Directory -Force -Path (Join-Path $root "loadtest\out\$runId") | Out-Null

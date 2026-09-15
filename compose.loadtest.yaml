@@ -9,20 +9,22 @@ services:
   web:
     environment:
       SPRING_PROFILES_ACTIVE: loadtest
-      SUBMIT_GLOBAL: ${SUBMIT_GLOBAL:-150}
+      SUBMIT_GLOBAL: ${SUBMIT_GLOBAL:-1000}
       QUERY_GLOBAL: "100000"
       STUDENT_FROM: "20001"
-      STUDENT_TO: "80000"
+      STUDENT_TO: "320000"
       MANAGEMENT_PORT: "18092"
   admission:
     environment:
       SPRING_PROFILES_ACTIVE: loadtest
-      SUBMIT_GLOBAL: ${SUBMIT_GLOBAL:-150}
+      SUBMIT_GLOBAL: ${SUBMIT_GLOBAL:-1000}
       QUERY_GLOBAL: "100000"
       STUDENT_FROM: "20001"
-      STUDENT_TO: "80000"
+      STUDENT_TO: "320000"
       MANAGEMENT_PORT: "18093"
       SYNC_BASELINE: ${SYNC_BASELINE:-false}
+      NACOS_CONFIG_ENABLED: "true"
+      HOTSPOT_PER_COURSE: ${HOTSPOT_PER_COURSE:-80}
     ports: ["127.0.0.1:18093:18093"]
   worker:
     environment:
@@ -61,7 +63,7 @@ services:
       BASE_URL: http://api:18080
       DEMO_PASSWORD: ${DEMO_PASSWORD:-demo-pass}
       STUDENT_FROM: "20001"
-      STUDENT_TO: "80000"
+      STUDENT_TO: "320000"
       COURSE_OPEN: "201"
       COURSE_SCARCE: "202"
       COURSE_FROM: "211"

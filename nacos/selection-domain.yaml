@@ -1,5 +1,6 @@
 app:
   reservation-seconds: 120
-  hotspot-per-course: 50
+  submit-global: 1000
+  hotspot-per-course: 80
   status-ttl-jitter-seconds: 300
   catalog-frozen: true
